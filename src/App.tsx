@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import badgeImgBigbrother from "./assets/bigbrother.jpg";
-import badgeImgCafe from "./assets/cafe.png";
-import badgeImgCommies from "./assets/commies.jpg";
+import badgeImgBigbrother from "@/assets/bigbrother.jpg";
+import badgeImgCafe from "@/assets/cafe.png";
+import badgeImgCommies from "@/assets/commies.jpg";
 import { initializeApp } from "firebase/app";
 import {
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
@@ -298,6 +298,52 @@ const BOOKS: Book[] = [
     debatePrompts:[{id:"narnia-d1",question:"¿Debe leerse Narnia como alegoría cristiana o como fantasía pura?",context:"C.S. Lewis dijo que Aslan era deliberadamente cristológico. ¿Enriquece o limita la historia saber eso al leer?"}],
     forumId:"narnia-forum"
   },
+  {
+    id:"frankenstein", title:"Frankenstein", author:"Mary Shelley", year:1818,
+    genre:"Novela gótica / Ciencia ficción", tagline:"¿Quién es realmente el monstruo?",
+    color:"#2E5C3A", spine:"#1C3D26", badgeIcon:"⚡", badgeName:"Creador",
+    questions:[
+      {difficulty:"easy",mode:"critical",concept:"El creador",text:"¿Quién es Victor Frankenstein?",options:["El monstruo creado en el laboratorio","Un científico obsesionado con descubrir el secreto de la vida que crea un ser con partes de cadáveres","Un médico que estudia la muerte en Ginebra","El narrador principal de la novela"],correct:1,feedback:"Victor es el verdadero protagonista: su ambición desmedida pone en marcha toda la tragedia.",feedbackAlt:"Es importante no confundir a Victor con su creación."},
+      {difficulty:"easy",mode:"critical",concept:"La criatura",text:"¿Cómo reacciona Victor Frankenstein al ver a su criatura viva?",options:["La abraza con orgullo paternal","La estudia científicamente","Huye aterrorizado, abandonándola sin nombre ni cuidado","La destruye inmediatamente"],correct:2,feedback:"El abandono de Victor es el verdadero origen del conflicto: la criatura nace sin padre, sin nombre, sin lugar en el mundo.",feedbackAlt:"Victor crea vida y huye de su responsabilidad — ese abandono desencadena todo."},
+      {difficulty:"easy",mode:"fragment",concept:"La humanidad de la criatura",text:"¿Qué revela este pasaje sobre la naturaleza de la criatura?",fragment:"Yo también podía describir emociones de placer y dolor. Sentía el frío y la calidez. Comía frutos del bosque. Pero lo más extraño: anhelaba compañía y afecto. Era, en esto, completamente humano.",options:["Que la criatura es puramente un animal instintivo","Que la criatura tiene emociones, necesidades y deseos humanos pero está condenada al rechazo","Que la criatura es superior a los humanos","Que la criatura no sufre realmente"],correct:1,feedback:"La criatura no es un monstruo nato: tiene capacidad de amor y deseo de conexión. La sociedad la convierte en lo que temen.",feedbackAlt:"Mary Shelley construyó a la criatura como un ser profundamente humano para desafiar al lector."},
+      {difficulty:"medium",mode:"critical",concept:"Responsabilidad del creador",text:"¿Qué crítica filosófica plantea la novela sobre la ciencia?",options:["Que la ciencia siempre es peligrosa y debe detenerse","Que el avance científico sin responsabilidad ética puede crear daños irreparables","Que Victor era un mal científico técnicamente","Que la ciencia del siglo XIX era demasiado primitiva"],correct:1,feedback:"Shelley no condena la ciencia sino la irresponsabilidad: crear sin aceptar las consecuencias.",feedbackAlt:"La novela es una advertencia sobre el poder sin ética, no sobre el conocimiento en sí."},
+      {difficulty:"medium",mode:"critical",concept:"La criatura vs. Victor",text:"¿Cuál de los dos personajes tiene mayor justificación moral para sus acciones?",options:["Victor, porque la criatura mató personas inocentes","La criatura, porque fue abandonada y rechazada sin haber elegido existir","Ambos tienen igual responsabilidad moral","Ninguno tiene justificación válida"],correct:1,feedback:"La criatura asesinó, pero nunca eligió existir ni ser abandonada. Victor creó la situación y huyó de ella.",feedbackAlt:"Shelley deliberadamente hace difícil juzgar a la criatura sin considerar el contexto de su creación."},
+      {difficulty:"hard",mode:"critical",concept:"¿Quién es el monstruo?",text:"¿Por qué el título 'Frankenstein' ambiguamente puede referirse tanto al creador como a la criatura?",options:["Porque Shelley cometió un error al titular la novela","Porque ambos son monstruos en sentido moral: uno por abandono irresponsable, el otro por venganza destructiva","Porque la criatura adoptó el apellido Frankenstein","Porque Victor y la criatura son la misma persona en sentido alegórico"],correct:1,feedback:"Esta ambigüedad es intencional: Shelley pregunta si el verdadero monstruo es quien tiene aspecto aterrador o quien actúa sin responsabilidad ni amor.",feedbackAlt:"El título sin nombre propio de la criatura es la pregunta central de la novela."},
+      {difficulty:"hard",mode:"highlight",concept:"El origen del mal",text:"Subraya la frase que mejor expresa por qué la criatura se convierte en lo que es:",fragment:"Fui benévolo y bueno; la miseria me hizo demonio. Hazme feliz y seré virtuoso de nuevo. Tú eres mi creador, pero yo soy tu amo — ¡obedéceme!",correctHighlight:"la miseria me hizo demonio",options:["Fui benévolo y bueno","la miseria me hizo demonio","yo soy tu amo","Tú eres mi creador"],correct:1,feedback:"La criatura no nació malvada. Fue el rechazo y el sufrimiento lo que la transformó — esa es la tesis de Shelley.",feedbackAlt:"'La miseria me hizo demonio' es una de las frases más importantes de la novela gótica."},
+      {difficulty:"hard",mode:"critical",concept:"Romanticismo",text:"¿Cómo se relaciona Frankenstein con el movimiento romántico?",options:["No tiene relación con el Romanticismo","Es una crítica al racionalismo ilustrado: la naturaleza y las emociones se rebelan contra el control científico","Es una celebración de los avances industriales de la época","Es principalmente una novela de terror sin contenido filosófico"],correct:1,feedback:"El Romanticismo reaccionó contra la Ilustración. Frankenstein muestra que el control racional de la naturaleza tiene consecuencias incontrolables.",feedbackAlt:"Mary Shelley escribe en el corazón del movimiento romántico inglés, junto a Byron y Percy Shelley."},
+    ],
+    flashcards:[
+      {id:"fc1",front:"¿Quién creó a la criatura y por qué la abandona?",back:"Victor Frankenstein la crea por ambición científica y la abandona aterrorizado al ver lo que hizo — ese abandono desencadena toda la tragedia."},
+      {id:"fc2",front:"¿Por qué la criatura se vuelve violenta?",back:"Por el rechazo absoluto de todos los humanos. Nació con capacidad de amor pero fue tratada como monstruo desde el primer momento."},
+      {id:"fc3",front:"¿Qué crítica filosófica hace Mary Shelley?",back:"Que el avance científico sin responsabilidad ética es destructivo. No condena la ciencia, condena la irresponsabilidad del creador."},
+      {id:"fc4",front:"¿Cuál es la ambigüedad central del título?",back:"'Frankenstein' puede referirse al creador irresponsable o a la criatura rechazada — ambos son 'monstruos' en sentido moral distinto."},
+    ],
+    debatePrompts:[{id:"frank-d1",question:"¿Victor Frankenstein o su criatura: quién es el verdadero monstruo?",context:"Victor creó vida y huyó de ella. La criatura mató gente inocente. ¿El origen del mal justifica sus actos o los contextualizan?"}],
+    forumId:"frankenstein-forum"
+  },
+  {
+    id:"tregua", title:"La tregua", author:"Mario Benedetti", year:1960,
+    genre:"Novela / Literatura latinoamericana", tagline:"Un amor que no debería existir, pero existe.",
+    color:"#7A3A2A", spine:"#5C2A1C", badgeIcon:"📓", badgeName:"Diarista",
+    questions:[
+      {difficulty:"easy",mode:"critical",concept:"El diario",text:"¿Qué forma narrativa usa Benedetti en La tregua?",options:["Una narración en tercera persona omnisciente","Un diario íntimo escrito por Martín Santomé que registra su vida cotidiana y sus emociones","Un monólogo dramático al estilo teatral","Cartas entre los protagonistas"],correct:1,feedback:"El diario es fundamental: nos da acceso directo a los pensamientos más íntimos de Santomé sin filtros.",feedbackAlt:"Benedetti elige el diario porque su protagonista es un hombre que raramente expresa sus emociones en voz alta."},
+      {difficulty:"easy",mode:"critical",concept:"Martín Santomé",text:"¿En qué situación vital se encuentra Martín Santomé al inicio?",options:["Es un joven que acaba de comenzar su carrera profesional","Es un viudo de mediana edad que cuenta los días para jubilarse, resignado a una vida sin sorpresas","Es un hombre casado que busca una aventura","Es un escritor que busca inspiración para su novela"],correct:1,feedback:"Santomé vive en una rutina que siente irreversible: viudo, padre de hijos adultos, esperando la jubilación como un escape.",feedbackAlt:"Su resignación inicial hace más poderoso el impacto de conocer a Laura."},
+      {difficulty:"easy",mode:"fragment",concept:"El amor tardío",text:"¿Qué revela este fragmento sobre la relación entre Santomé y Laura?",fragment:"Ella tiene veinticuatro años. Yo tengo cuarenta y nueve. Hay veinticinco años de diferencia. Debería ser un obstáculo insalvable. Pero cuando estamos juntos, esos veinticinco años desaparecen. O quizás son lo que nos hace tan diferentes y tan necesarios.",options:["Que la diferencia de edad no importa en el amor real","Que Santomé acepta la relación pero también es consciente de su improbabilidad — esa tensión es el núcleo emocional de la novela","Que Laura busca una figura paterna en Santomé","Que la sociedad aprueba su relación"],correct:1,feedback:"Benedetti no niega la improbabilidad: la tensión entre lo que siente y lo que 'debería' sentir es lo que hace a Santomé humano y creíble.",feedbackAlt:"La honestidad de Santomé sobre sus propias dudas es lo que hace que el lector lo acompañe."},
+      {difficulty:"medium",mode:"critical",concept:"El título",text:"¿Qué significa 'La tregua' en el contexto de la novela?",options:["Una pausa en la guerra entre generaciones","El período de amor con Laura es una tregua breve en la rutina y la soledad de la vida de Santomé","Una metáfora de la paz política en Uruguay","La tregua que Santomé hace con sus hijos"],correct:1,feedback:"La tregua es el amor: una pausa improbable y breve en una vida de resignación. Cuando termina, la soledad es aún más profunda.",feedbackAlt:"El título ya anticipa que la felicidad será temporal — es una tregua, no una victoria."},
+      {difficulty:"medium",mode:"critical",concept:"Contexto social",text:"¿Qué critica Benedetti a través de los personajes secundarios?",options:["La corrupción política directa del gobierno uruguayo","La mediocridad y la hipocresía de la clase media uruguaya que acepta su vacío sin cuestionarlo","La violencia social de los barrios pobres de Montevideo","La falta de educación en Uruguay"],correct:1,feedback:"Los colegas de oficina, los hijos, los vecinos — todos representan una clase media atrapada en convenciones que nunca cuestiona.",feedbackAlt:"Benedetti usa la oficina como microcosmos de la sociedad."},
+      {difficulty:"hard",mode:"critical",concept:"El final",text:"¿Por qué el final de la novela es tan devastador?",options:["Porque Santomé muere al final","Porque Laura muere y Santomé debe volver exactamente a la misma vida que tenía antes, pero ahora sabe lo que perdió","Porque los hijos de Santomé descubren la relación y lo rechazan","Porque Laura lo abandona por alguien más joven"],correct:1,feedback:"La tragedia no es solo la muerte de Laura: es que Santomé debe volver a la rutina conociendo ahora el peso de lo que perdió para siempre.",feedbackAlt:"Benedetti no da catarsis. La vida simplemente continúa, más vacía."},
+      {difficulty:"hard",mode:"highlight",concept:"La resignación",text:"Subraya la frase que mejor captura la actitud de Santomé antes de conocer a Laura:",fragment:"Me faltan dos años y tres meses para jubilarme. Ya lo he calculado muchas veces: ochocientos cincuenta días. No es que los cuente con ansiedad o con miedo. Los cuento simplemente. Como quien registra el tiempo que falta para que algo termine, sin que importe demasiado qué viene después.",correctHighlight:"sin que importe demasiado qué viene después",options:["Me faltan dos años y tres meses","ochocientos cincuenta días","Los cuento simplemente","sin que importe demasiado qué viene después"],correct:3,feedback:"Esa frase captura la resignación total: Santomé no espera nada de lo que viene — solo el fin de lo que hay.",feedbackAlt:"Esta indiferencia ante el futuro hace que el lector entienda cuánto cambia Laura su mundo interior."},
+      {difficulty:"hard",mode:"critical",concept:"Amor y sociedad",text:"¿Por qué la relación Santomé-Laura es una amenaza para el orden social que rodea al protagonista?",options:["Porque es ilegal en Uruguay en 1960","Porque rompe las expectativas de cómo un hombre de su edad y posición 'debería' comportarse y sentir","Porque Laura pertenece a una clase social diferente","Porque Santomé es casado cuando conoce a Laura"],correct:1,feedback:"Benedetti muestra que la sociedad tiene un guión para cada etapa de la vida. Santomé se sale del guión y eso genera incomodidad en todos a su alrededor.",feedbackAlt:"La novela critica cómo la sociedad limita la capacidad de sentir según la edad y el rol social."},
+    ],
+    flashcards:[
+      {id:"fc1",front:"¿Qué es 'La tregua' como metáfora?",back:"El amor entre Santomé y Laura: una pausa breve y luminosa en una vida de resignación y rutina que termina con la muerte de ella."},
+      {id:"fc2",front:"¿Por qué Benedetti elige el formato de diario?",back:"Para dar acceso directo a los pensamientos más íntimos de Santomé, un hombre que raramente expresa sus emociones en voz alta."},
+      {id:"fc3",front:"¿Qué representa la oficina en la novela?",back:"Un microcosmos de la clase media uruguaya: personas atrapadas en convenciones y rutinas que nunca cuestionan."},
+      {id:"fc4",front:"¿Por qué el final es devastador?",back:"Santomé debe volver exactamente a su vida anterior, pero ahora sabe lo que perdió. La rutina continúa, más vacía que antes."},
+    ],
+    debatePrompts:[{id:"tregua-d1",question:"¿El amor de Santomé por Laura es genuino o es una crisis de mediana edad disfrazada de amor?",context:"Santomé tiene 49 años, está a punto de jubilarse y conoce a una mujer 25 años menor. ¿Eso hace menos real lo que siente?"}],
+    forumId:"tregua-forum"
+  },
 ];
 
 // ── Firebase helpers ──────────────────────────────────────────────────────────
@@ -522,36 +568,37 @@ function HomeScreen({ user, stats, onBook }: { user: User|null; stats: Stats; on
           Biblioteca · <span style={{ color:"#D4A853" }}>{BOOKS.length} obras</span>
         </h3>
 
-        {/* Bookshelf */}
-        {[0,1,2].map(row => {
-          const rowBooks = BOOKS.slice(row*4, row*4+4);
-          if (!rowBooks.length) return null;
-          return (
+        {/* Bookshelf — 4 per row on mobile, 6-7 on desktop */}
+        {(() => {
+          const perRow = typeof window !== "undefined" && window.innerWidth >= 1024 ? 7 : 4;
+          const rows = [];
+          for (let i = 0; i < BOOKS.length; i += perRow) rows.push(BOOKS.slice(i, i + perRow));
+          return rows.map((rowBooks, row) => (
             <div key={row} className="mb-5">
-              <div className="relative rounded-2xl overflow-hidden py-5" style={{ background:"#1A0A04", border:"1px solid #2A1408" }}>
-                <div className="absolute bottom-0 left-0 right-0 h-3" style={{ background:"#3D1F0A", boxShadow:"0 4px 16px rgba(0,0,0,0.5)" }} />
-                <div className="flex items-end justify-center gap-2 sm:gap-4 px-4 sm:px-8 pb-3">
+              <div className="relative rounded-2xl overflow-hidden py-5 sm:py-7" style={{ background:"#1A0A04", border:"1px solid #2A1408" }}>
+                <div className="absolute bottom-0 left-0 right-0 h-3 sm:h-4" style={{ background:"#3D1F0A", boxShadow:"0 4px 16px rgba(0,0,0,0.5)" }} />
+                <div className="flex items-end justify-center gap-2 sm:gap-3 lg:gap-5 px-4 sm:px-8 lg:px-12 pb-3 sm:pb-4">
                   {rowBooks.map(book => <BookSpine key={book.id} book={book} completed={(stats.completedBooks??[]).includes(book.id)} onClick={() => onBook(book)} />)}
                 </div>
               </div>
             </div>
-          );
-        })}
+          ));
+        })()}
 
         {/* List */}
-        <h3 className="font-display text-sm font-medium mb-3 mt-6" style={{ color:"#5C3518", letterSpacing:"0.1em", textTransform:"uppercase" }}>Todas las obras</h3>
-        <div className="space-y-1.5">
+        <h3 className="font-display text-sm sm:text-base font-medium mb-3 mt-6" style={{ color:"#5C3518", letterSpacing:"0.1em", textTransform:"uppercase" }}>Todas las obras</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
           {BOOKS.map(book => (
-            <button key={book.id} onClick={() => onBook(book)} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all hover:border-amber-900 group" style={{ background:"#1A0C04", borderColor:"#2A1408" }}>
-              <div className="w-1 h-9 rounded-full flex-shrink-0" style={{ background:book.color }} />
+            <button key={book.id} onClick={() => onBook(book)} className="flex items-center gap-3 px-4 py-3.5 sm:py-4 rounded-xl border text-left transition-all hover:border-amber-900 group" style={{ background:"#1A0C04", borderColor:"#2A1408" }}>
+              <div className="w-1.5 h-10 rounded-full flex-shrink-0" style={{ background:book.color }} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm truncate" style={{ color:"#F5ECD7" }}>{book.title}</span>
+                  <span className="font-medium text-sm sm:text-base truncate" style={{ color:"#F5ECD7" }}>{book.title}</span>
                   {(stats.completedBooks??[]).includes(book.id) && <span className="flex-shrink-0 text-xs px-1.5 py-0.5 rounded" style={{ background:"rgba(212,168,83,0.15)", color:"#D4A853" }}>✓</span>}
                 </div>
-                <span className="text-xs" style={{ color:"#5C3518" }}>{book.author} · {book.year}</span>
+                <span className="text-xs sm:text-sm" style={{ color:"#5C3518" }}>{book.author} · {book.year}</span>
               </div>
-              <span style={{ color:"#3D1F0A" }} className="group-hover:text-amber-800 transition-colors flex-shrink-0">›</span>
+              <span className="text-lg sm:text-xl flex-shrink-0" style={{ color:"#3D1F0A" }}>›</span>
             </button>
           ))}
         </div>
@@ -563,12 +610,12 @@ function HomeScreen({ user, stats, onBook }: { user: User|null; stats: Stats; on
 function BookSpine({ book, completed, onClick }: { book: Book; completed: boolean; onClick: () => void }) {
   return (
     <div className="book-spine cursor-pointer flex-shrink-0" onClick={onClick} title={book.title}>
-      <div className="spine-inner rounded-sm flex flex-col items-center justify-between py-2 relative" style={{ width:40, height:140, background:book.color, borderLeft:`4px solid ${book.spine}`, boxShadow:"2px 4px 12px rgba(0,0,0,0.5)" }}>
+      <div className="spine-inner rounded-sm flex flex-col items-center justify-between py-2 relative" style={{ width:"clamp(44px,4.5vw,64px)", height:"clamp(150px,16vw,220px)", background:book.color, borderLeft:`5px solid ${book.spine}`, boxShadow:"3px 6px 18px rgba(0,0,0,0.6)" }}>
         {completed && <div className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-xs z-10 font-bold" style={{ background:"#D4A853", color:"#120A04" }}>✓</div>}
         <div className="flex-1 flex items-center justify-center overflow-hidden px-1" style={{ writingMode:"vertical-rl", transform:"rotate(180deg)" }}>
-          <span className="font-display font-bold text-center leading-tight" style={{ color:"rgba(255,255,255,0.92)", fontSize:"10px" }}>{book.title}</span>
+          <span className="font-display font-bold text-center leading-tight" style={{ color:"rgba(255,255,255,0.95)", fontSize:"clamp(10px,1.1vw,14px)" }}>{book.title}</span>
         </div>
-        <span style={{ fontSize:"8px", color:"rgba(255,255,255,0.5)", writingMode:"vertical-rl", transform:"rotate(180deg)" }}>{book.author.split(" ").pop()}</span>
+        <span style={{ fontSize:"clamp(8px,0.8vw,11px)", color:"rgba(255,255,255,0.6)", writingMode:"vertical-rl", transform:"rotate(180deg)" }}>{book.author.split(" ").pop()}</span>
       </div>
     </div>
   );
