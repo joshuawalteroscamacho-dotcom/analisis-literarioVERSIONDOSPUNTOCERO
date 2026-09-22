@@ -1,0 +1,10 @@
+{
+  "description": "Interactive app enhancing critical analysis and reading comprehension with gamified lessons, progress tracking, and engaging book content for learners.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
