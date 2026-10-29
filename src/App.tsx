@@ -27,9 +27,10 @@ const db = getFirestore(fbApp);
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Difficulty = "easy" | "medium" | "hard";
 interface Question {
-  difficulty: Difficulty; mode: "critical" | "fragment" | "highlight";
+  difficulty: Difficulty; mode: "critical" | "fragment" | "highlight" | "reorder" | "match" | "fallacy" | "verdict" | "agenda" | "stress" | "noise";
   concept: string; text: string; options: string[]; correct: number;
   feedback: string; feedbackAlt: string; fragment?: string; correctHighlight?: string;
+  orderItems?: string[]; matchPairs?: { left: string; right: string }[]; noiseWords?: string[];
 }
 interface Flashcard { id: string; front: string; back: string; }
 interface DebatePrompt { id: string; question: string; context: string; }
@@ -44,6 +45,8 @@ interface Stats {
   points: number; streak: number; completedBooks: string[];
   completedBooksHard: string[]; lastActive: string;
   totalQuizzes: number; totalDebates: number; totalForumPosts: number;
+  completedLevels: string[];
+  bestDebateResponse?: { text: string; likes: number; bookTitle: string };
 }
 interface ForumPost {
   id: string; user: string; text: string; ts: number;
@@ -52,13 +55,50 @@ interface ForumPost {
 }
 interface DebatePost {
   id: string; user: string; text: string; ts: number;
-  likes: number; likedBy: string[];
+  likes: number; likedBy: string[]; authorId?: string;
 }
 
 const DEFAULT_STATS: Stats = {
   points: 0, streak: 0, completedBooks: [], completedBooksHard: [],
-  lastActive: "", totalQuizzes: 0, totalDebates: 0, totalForumPosts: 0
+  lastActive: "", totalQuizzes: 0, totalDebates: 0, totalForumPosts: 0,
+  completedLevels: [],
 };
+
+interface BookExperience { setting: string; role: string; description: string; mission: string; }
+const BOOK_EXPERIENCES: Record<string, BookExperience> = {
+  "1984": { setting:"Ministerio de la Verdad", role:"Inspector de archivos", description:"Una sociedad totalitaria altera el lenguaje, la memoria y hasta la intimidad para hacer imposible la disidencia.", mission:"Detecta contradicciones, propaganda y pruebas borradas antes de que el Partido reescriba el expediente." },
+  granja: { setting:"Archivo de la Granja Animal", role:"Cronista de la rebelión", description:"Una revolución por la igualdad termina reproduciendo los abusos del régimen que prometía destruir.", mission:"Reconstruye cómo las consignas y los mandamientos cambian para proteger a quienes concentran el poder." },
+  chocolate: { setting:"Cocina de la familia De la Garza", role:"Intérprete de memorias", description:"El amor, la tradición y la rebeldía se transmiten a través de recetas capaces de expresar lo que las palabras callan.", mission:"Lee cada emoción como evidencia y separa las normas familiares de los deseos de sus personajes." },
+  espiritus: { setting:"Casa Trueba", role:"Archivero de generaciones", description:"Cuatro generaciones atraviesan conflictos familiares, desigualdad social, violencia política y memoria.", mission:"Conecta testimonios y silencios para establecer qué versión del pasado resiste al poder." },
+  maus: { setting:"Archivo de testimonios", role:"Curador de memoria", description:"Un hijo reconstruye la supervivencia de su padre durante el Holocausto y el daño que continúa después.", mission:"Distingue memoria, trauma y representación sin reducir el testimonio a una cronología simple." },
+  principito: { setting:"Observatorio de asteroides", role:"Cartógrafo de vínculos", description:"Un pequeño viajero examina el mundo adulto y descubre que cuidar, amar y mirar de verdad crean responsabilidad.", mission:"Descifra símbolos y decide qué enseñan los encuentros del principito sobre las relaciones humanas." },
+  dorian: { setting:"Galería del retrato", role:"Perito moral", description:"Un joven conserva su belleza mientras un retrato registra la corrupción causada por sus decisiones.", mission:"Examina influencia, responsabilidad y apariencia para emitir un veredicto sobre la decadencia de Dorian." },
+  fahrenheit: { setting:"Brigada de libros prohibidos", role:"Bombero disidente", description:"En una sociedad que quema libros y evita toda incomodidad, un bombero empieza a cuestionar su función.", mission:"Rescata ideas del fuego y reconoce cómo entretenimiento, censura y conformismo debilitan el pensamiento." },
+  cien: { setting:"Archivo de Macondo", role:"Descifrador de manuscritos", description:"La familia Buendía repite amores, guerras y soledades mientras la historia de Macondo gira sobre sí misma.", mission:"Ordena ciclos, nombres y recuerdos antes de que el olvido borre una vez más lo sucedido." },
+  mundofeliz: { setting:"Centro de Condicionamiento", role:"Auditor de estabilidad", description:"Una sociedad elimina el dolor mediante castas, consumo y placer, pero también sacrifica libertad y profundidad.", mission:"Evalúa si la felicidad programada justifica renunciar al arte, la verdad y el derecho a elegir." },
+  narnia: { setting:"Consejo de Cair Paravel", role:"Guardián de la Magia Profunda", description:"Cuatro hermanos entran en un reino bajo un invierno eterno y participan en una historia de traición y redención.", mission:"Interpreta decisiones, símbolos y sacrificios para distinguir poder, gracia y responsabilidad." },
+  frankenstein: { setting:"Tribunal de Ginebra", role:"Fiscal de responsabilidad científica", description:"Victor Frankenstein crea vida y abandona a su criatura, iniciando una cadena de aislamiento y venganza.", mission:"Contrasta testimonios y determina quién responde por las consecuencias de crear y abandonar." },
+  tregua: { setting:"Archivo personal de Santomé", role:"Editor de diario íntimo", description:"Un viudo próximo a jubilarse encuentra un amor inesperado que interrumpe brevemente su vida rutinaria.", mission:"Lee lo que Santomé dice y lo que evita para evaluar si su transformación es genuina." },
+};
+function getBookExperience(book: Book): BookExperience {
+  return BOOK_EXPERIENCES[book.id] ?? { setting:"Sala de lectura", role:"Detective de la lógica", description:book.tagline, mission:"Examina la evidencia y construye una interpretación razonada." };
+}
+
+function questionHint(q: Question): string {
+  const hints: Record<Question["mode"], string> = {
+    critical:`Busca qué opción explica el concepto «${q.concept}» y no solo repite una palabra de la pregunta.`,
+    fragment:"Distingue lo que el fragmento demuestra de lo que parece razonable, pero no está respaldado por el texto.",
+    highlight:"Busca la frase que aporta una prueba concreta; evita opiniones generales o simples conclusiones.",
+    reorder:"Identifica primero el dato verificable, después la interpretación y por último la conclusión.",
+    match:"Compara el significado preciso de cada concepto antes de conectarlo con una interpretación.",
+    fallacy:"Pregunta si el argumento ataca a una persona, deforma una postura, iguala casos distintos o inventa una causa.",
+    verdict:"Decide si hay evidencia suficiente y una conexión lógica entre las razones y la conclusión.",
+    agenda:"Pregunta quién gana poder, legitimidad o recursos si el lector acepta el mensaje sin cuestionarlo.",
+    stress:"Busca el dato que contradice directamente la premisa central, no uno que solo añada contexto.",
+    noise:"Tacha únicamente palabras emocionales o valorativas. Conserva nombres, acciones y datos verificables.",
+  };
+  return hints[q.mode];
+}
 
 function selectQuestions(pool: Question[], n: number, diff?: Difficulty): (Question & { _idx: number })[] {
   const indexed = pool.map((q, i) => ({ ...q, _idx: i }));
@@ -66,6 +106,167 @@ function selectQuestions(pool: Question[], n: number, diff?: Difficulty): (Quest
   const primary = [...indexed.filter(q => q.difficulty === diff)].sort(() => Math.random() - 0.5);
   const others = [...indexed.filter(q => q.difficulty !== diff)].sort(() => Math.random() - 0.5);
   return [...primary, ...others].slice(0, n);
+}
+
+function shuffled<T>(items: T[]): T[] {
+  return [...items].sort(() => Math.random() - 0.5);
+}
+
+function buildQuizQuestions(book: Book, difficulty: Difficulty): (Question & { _idx: number })[] {
+  const target: Record<Difficulty, number> = { easy: 5, medium: 8, hard: 11 };
+  const pool = book.questions.filter(q => q.difficulty === difficulty);
+  const source = shuffled(pool);
+  const sample = (index: number) => source[index % source.length];
+  const evidenceSource = sample(0);
+  const evidenceSentence = evidenceSource.feedback;
+  const evidence: Question & { _idx: number } = {
+    ...evidenceSource,
+    _idx: 1000,
+    mode: "highlight",
+    concept: "Inspector de evidencia",
+    text: difficulty === "hard"
+      ? "Aísla la frase que funciona como evidencia decisiva y no como simple valoración."
+      : "Selecciona la frase exacta que contiene la evidencia central.",
+    fragment: `Una lectura superficial de ${book.title} se limita a resumir su argumento. ${evidenceSentence} Esta observación permite sostener una interpretación verificable del conflicto.`,
+    options: [
+      `Una lectura superficial de ${book.title} se limita a resumir su argumento.`,
+      evidenceSentence,
+      "Esta observación permite sostener una interpretación verificable del conflicto.",
+    ],
+    correctHighlight: evidenceSentence,
+    correct: 1,
+    feedback: "Identificaste la proposición que aporta evidencia textual a la inferencia.",
+    feedbackAlt: "La evidencia debía ser una afirmación verificable sobre la obra, no una valoración general.",
+  };
+
+  const reasoning = sample(1);
+  const orderItems = [
+    `Premisa textual: ${reasoning.options[reasoning.correct]}.`,
+    `Inferencia: ${reasoning.feedbackAlt}`,
+    `Conclusión: ${reasoning.feedback}`,
+  ];
+  const reorder: Question & { _idx: number } = {
+    difficulty,
+    mode: "reorder",
+    concept: "Arquitectura argumentativa",
+    text: difficulty === "hard"
+      ? "Reconstruye el argumento sin confundir evidencia, inferencia y conclusión."
+      : "Ordena la premisa, la inferencia y la conclusión.",
+    options: [],
+    correct: 0,
+    orderItems,
+    feedback: "El argumento avanza de la evidencia a su interpretación y termina en la tesis.",
+    feedbackAlt: "Revisa la función lógica de cada enunciado: primero evidencia, después inferencia y al final conclusión.",
+    _idx: 1001,
+  };
+
+  const pairSources = [sample(2), sample(3), sample(4)];
+  const pairs = pairSources.map(q => ({ left: q.concept, right: q.options[q.correct] }));
+  const match: Question & { _idx: number } = {
+    difficulty,
+    mode: "match",
+    concept: "Mapa de posturas",
+    text: difficulty === "hard"
+      ? "Relaciona cada núcleo conceptual con la interpretación que mejor conserva sus matices."
+      : "Empareja cada concepto con su interpretación.",
+    options: [],
+    correct: 0,
+    matchPairs: pairs,
+    feedback: "Construiste un mapa conceptual consistente con las tensiones de la obra.",
+    feedbackAlt: "Alguna relación reduce o desplaza el sentido del concepto. Contrasta cada postura con la evidencia.",
+    _idx: 1002,
+  };
+
+  const fallacySource = sample(5);
+  const fallacies = ["Ad Hominem", "Hombre de Paja", "Falsa Equivalencia", "Causa falsa"];
+  const fallacy: Question & { _idx: number } = {
+    difficulty,
+    mode: "fallacy",
+    concept: "Cartas de falacia",
+    text: "Juega la carta que identifica el defecto del razonamiento.",
+    fragment: `La interpretación de «${fallacySource.concept}» es incorrecta porque quienes la defienden claramente no entendieron ${book.title}.`,
+    options: fallacies,
+    correct: 0,
+    feedback: "Es un Ad Hominem: desacredita a quienes sostienen la postura en vez de refutar sus razones.",
+    feedbackAlt: "El argumento ataca la capacidad de los lectores, no la validez de la interpretación.",
+    _idx: 1003,
+  };
+
+  const verdictSource = sample(6);
+  const verdict: Question & { _idx: number } = {
+    difficulty,
+    mode:"verdict",
+    concept:"Veredicto rápido",
+    text:"Emite un veredicto: ¿el razonamiento se sostiene?",
+    fragment:`Como «${verdictSource.concept}» aparece en ${book.title}, necesariamente es la causa de todos los conflictos de la obra.`,
+    options:["Argumento válido","Falacia / opinión sin sustento"],
+    correct:1,
+    feedback:"Veredicto correcto: presencia no significa causalidad. La afirmación generaliza sin demostrar el vínculo.",
+    feedbackAlt:"La frase parece segura, pero convierte una coincidencia temática en causa absoluta sin aportar evidencia.",
+    _idx:1004,
+  };
+  const nostalgia: Question & { _idx: number } = {
+    difficulty:"easy",
+    mode:"fallacy",
+    concept:"Sesgo y falacia",
+    text:"Toca la carta que identifica el recurso usado para sostener la conclusión.",
+    fragment:"«Los jóvenes ya no leen libros porque pasan todo el día en pantallas. En mis tiempos leíamos obras maestras y éramos más inteligentes».",
+    options:["Sesgo de nostalgia","Ad Hominem","Hombre de Paja","Falsa Equivalencia"],
+    correct:0,
+    feedback:"El hablante idealiza su propio pasado y lo usa como prueba, sin datos que demuestren que su generación era más inteligente.",
+    feedbackAlt:"La trampa consiste en confundir un recuerdo idealizado con evidencia sobre dos generaciones completas.",
+    _idx:1005,
+  };
+  const agenda: Question & { _idx: number } = {
+    difficulty,
+    mode:"agenda",
+    concept:"La Agenda Oculta",
+    text:"¿Qué actor se beneficia más si esta versión se acepta como verdad?",
+    fragment:`«El orden de ${getBookExperience(book).setting} solo puede conservarse si nadie cuestiona la versión oficial de los hechos».`,
+    options:["La autoridad que controla el relato","La ciudadanía que exige pruebas","Quienes conservan versiones alternativas"],
+    correct:0,
+    feedback:"Detectaste al beneficiario: controlar la versión oficial protege a la autoridad de cualquier rendición de cuentas.",
+    feedbackAlt:"La trampa era elegir al actor mencionado de forma más simpática. Sigue el poder: ¿quién evita ser cuestionado?",
+    _idx:1006,
+  };
+  const stress: Question & { _idx: number } = {
+    difficulty,
+    mode:"stress",
+    concept:"Prueba de Estrés",
+    text:"Lanza el dato que más debilita la solidez del argumento.",
+    fragment:`Argumento bajo prueba: «Como ${sample(0).concept.toLowerCase()} aparece repetidamente en ${book.title}, todos los personajes reaccionan de la misma manera».`,
+    options:[
+      "Un contraejemplo donde un personaje responde de forma opuesta",
+      `La fecha de publicación de la obra: ${book.year}`,
+      `Una descripción general del género ${book.genre.toLowerCase()}`,
+    ],
+    correct:0,
+    feedback:"El contraejemplo rompe la generalización universal: basta una respuesta opuesta para demostrar que no todos actúan igual.",
+    feedbackAlt:"Ese dato puede ser verdadero, pero no golpea la premisa «todos reaccionan igual». Era ruido contextual.",
+    _idx:1007,
+  };
+  const noise: Question & { _idx: number } = {
+    difficulty,
+    mode:"noise",
+    concept:"Filtro de Ruido",
+    text:"Tacha las expresiones manipulativas y deja solo la información verificable.",
+    fragment:`La evidentemente peligrosa autoridad impuso una norma el ${book.year}, provocando una intolerable y desastrosa reacción pública.`,
+    options:[],
+    correct:0,
+    noiseWords:["evidentemente peligrosa","intolerable","desastrosa"],
+    feedback:"Eliminaste las valoraciones emocionales. Ahora queda una afirmación que puede verificarse con evidencia.",
+    feedbackAlt:"La trampa fue borrar información comprobable o conservar adjetivos que ya dictaban cómo debía sentirse el lector.",
+    _idx:1008,
+  };
+
+  const advanced = difficulty === "easy"
+    ? [nostalgia, verdict, noise]
+    : difficulty === "hard"
+      ? [evidence, reorder, match, fallacy, verdict, agenda, stress, noise]
+      : [evidence, reorder, verdict, agenda, stress];
+  const baseCount = target[difficulty] - advanced.length;
+  const base = selectQuestions(pool, baseCount, difficulty);
+  return shuffled([...base, ...advanced]);
 }
 
 // ── Books ─────────────────────────────────────────────────────────────────────
@@ -580,11 +781,11 @@ function LoginModal({ onClose, onLogin }: { onClose: () => void; onLogin: (u: Us
 }
 
 // ── Bottom Tab Nav ─────────────────────────────────────────────────────────────
-type Tab = "library" | "profile";
+type Tab = "library" | "manual" | "profile";
 function BottomNav({ tab, onChange, user }: { tab: Tab; onChange: (t: Tab) => void; user: User|null }) {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 border-t flex sm:hidden" style={{ background:"rgba(18,10,4,0.98)", backdropFilter:"blur(12px)", borderColor:"#2A1408" }}>
-      {([["library","📚","Biblioteca"],["profile","👤","Perfil"]] as [Tab,string,string][]).map(([t,icon,label]) => (
+      {([["library","📚","Biblioteca"],["manual","▤","Manual"],["profile","👤","Perfil"]] as [Tab,string,string][]).map(([t,icon,label]) => (
         <button key={t} onClick={() => onChange(t)} className="flex-1 flex flex-col items-center py-2 gap-0.5 transition-colors" style={{ color: tab===t?"#D4A853":"#3D1F0A" }}>
           <span className="text-xl">{icon}</span>
           <span className="text-xs font-medium">{label}</span>
@@ -603,7 +804,7 @@ function DesktopNav({ tab, onChange, user, onLoginClick, onLogout }: { tab: Tab;
         <div className="flex items-center gap-6">
           <span className="font-display text-2xl font-bold" style={{ color:"#D4A853" }}>Análisis</span>
           <div className="flex gap-1">
-            {([["library","📚 Biblioteca"],["profile","👤 Perfil"]] as [Tab,string][]).map(([t,label]) => (
+            {([["library","📚 Biblioteca"],["manual","▤ Manual"],["profile","👤 Perfil"]] as [Tab,string][]).map(([t,label]) => (
               <button key={t} onClick={() => onChange(t)} className="px-4 py-1.5 rounded-lg text-sm font-medium transition-colors" style={{ background:tab===t?"#2A1408":"transparent", color:tab===t?"#D4A853":"#5C3518" }}>{label}</button>
             ))}
           </div>
@@ -620,9 +821,93 @@ function DesktopNav({ tab, onChange, user, onLoginClick, onLogout }: { tab: Tab;
   );
 }
 
+// ── Analyst Manual ────────────────────────────────────────────────────────────
+const MANUAL_CATEGORIES = [
+  {
+    id:"bias", label:"1. Sesgos", summary:"Descubre quién intenta orientar tu lectura.",
+    items:[
+      { title:"La Agenda Oculta", mechanic:"Relaciona un mensaje con el actor que obtiene poder si ese mensaje se acepta.", example:"«Solo la versión oficial garantiza el orden». El gobierno evita que otras voces cuestionen sus decisiones.", steps:["Subraya la afirmación que se presenta como inevitable.","Identifica qué actores ganan o pierden poder.","Elige al beneficiario directo, no al actor más visible."] },
+      { title:"Cartas de Falacia", mechanic:"Clasifica el atajo lógico que reemplaza a una prueba válida.", example:"«No escuches su interpretación: ni siquiera entendió el libro» ataca al lector, no a su argumento.", steps:["Separa la conclusión de las razones.","Pregunta si las razones realmente prueban la conclusión.","Compara el defecto con la definición de cada carta."] },
+    ],
+  },
+  {
+    id:"strength", label:"2. Solidez", summary:"Comprueba si una conclusión resiste evidencia contraria.",
+    items:[
+      { title:"Prueba de Estrés", mechanic:"Lanza el dato que golpea directamente la premisa principal.", example:"Para refutar «todos actúan igual», un solo contraejemplo es más fuerte que diez datos de contexto.", steps:["Localiza la palabra absoluta: todos, nunca, siempre.","Busca una hipótesis que contradiga esa universalidad.","Descarta datos ciertos que no cambian la conclusión."] },
+      { title:"Arquitectura Argumentativa", mechanic:"Ordena evidencia, inferencia y conclusión para reconstruir la lógica.", example:"Hecho observable → interpretación del hecho → tesis que se quiere defender.", steps:["Empieza por lo que puede comprobarse.","Continúa con la conexión razonada.","Termina con la afirmación más amplia."] },
+    ],
+  },
+  {
+    id:"transfer", label:"3. Transferencia", summary:"Aplica una idea a nuevos contextos sin deformarla.",
+    items:[
+      { title:"Match de Posturas", mechanic:"Conecta conceptos con interpretaciones que conservan sus matices.", example:"Vigilancia no equivale simplemente a tecnología: importa quién observa, con qué poder y para qué.", steps:["Define cada concepto con tus palabras.","Elimina conexiones demasiado generales.","Comprueba que ninguna respuesta sirva igual para todo."] },
+      { title:"Veredictos Rápidos", mechanic:"Decide si una frase contiene argumento o solo una afirmación segura de sí misma.", example:"«Aparece muchas veces, por lo tanto causa todo» confunde repetición con causalidad.", steps:["Busca una razón identificable.","Comprueba el vínculo con la conclusión.","Desliza según exista o no sustento suficiente."] },
+    ],
+  },
+  {
+    id:"meta", label:"4. Metacognición", summary:"Observa cómo las palabras intentan decidir por ti.",
+    items:[
+      { title:"Filtro de Ruido", mechanic:"Tacha adjetivos manipulativos para recuperar el dato objetivo.", example:"«La desastrosa e intolerable decisión ocurrió el lunes» → «La decisión ocurrió el lunes».", steps:["Conserva nombres, acciones, fechas y cantidades.","Tacha palabras que ordenan sentir aprobación o rechazo.","Relee el resultado y pregunta qué evidencia falta."] },
+      { title:"Inspector de Evidencia", mechanic:"Distingue una prueba concreta de una opinión o una conclusión.", example:"Una escena observable es evidencia; decir «esto demuestra que es malo» ya es interpretación.", steps:["Busca aquello que otro lector podría verificar.","Evita frases que solo valoran.","Comprueba si la evidencia respalda exactamente la tesis."] },
+    ],
+  },
+];
+
+function ManualScreen() {
+  const [category, setCategory] = useState(MANUAL_CATEGORIES[0].id);
+  const [openItem, setOpenItem] = useState<string|null>(MANUAL_CATEGORIES[0].items[0].title);
+  const active = MANUAL_CATEGORIES.find(item=>item.id===category)??MANUAL_CATEGORIES[0];
+  return (
+    <div className="min-h-screen pb-24 sm:pb-10 screen-enter" style={{ background:"#120A04" }}>
+      <div className="max-w-3xl mx-auto px-4 py-6 sm:py-10">
+        <div className="rounded-3xl border p-5 sm:p-7 mb-5" style={{ background:"linear-gradient(145deg,#1E0E04,#2A1408)", borderColor:"#3D1F0A" }}>
+          <p className="text-xs tracking-[0.25em] uppercase mb-2" style={{ color:"#D4A853" }}>Codex de campo</p>
+          <h1 className="font-display text-3xl font-black mb-2" style={{ color:"#F5ECD7" }}>Manual del Analista</h1>
+          <p className="text-sm leading-relaxed max-w-xl" style={{ color:"#7A5C3E" }}>Estudia cada herramienta antes de abrir un expediente. Aquí no memorizas respuestas: aprendes qué observar, qué descartar y cómo justificar un veredicto.</p>
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
+          {MANUAL_CATEGORIES.map(item=>(
+            <button key={item.id} onClick={()=>{setCategory(item.id);setOpenItem(item.items[0].title);}} className="whitespace-nowrap px-3.5 py-2.5 rounded-xl border text-xs font-bold" style={{ background:category===item.id?"#D4A853":"#1A0C04", borderColor:category===item.id?"#D4A853":"#2A1408", color:category===item.id?"#120A04":"#7A5C3E" }}>{item.label}</button>
+          ))}
+        </div>
+        <div className="rounded-2xl border p-4 mb-3" style={{ background:"#1A0C04", borderColor:"#2A1408" }}>
+          <p className="text-xs uppercase tracking-widest mb-1" style={{ color:"#5C3518" }}>Objetivo del módulo</p>
+          <p className="text-sm" style={{ color:"#EDE0C4" }}>{active.summary}</p>
+        </div>
+        <div className="space-y-3">
+          {active.items.map(item=>{
+            const open=openItem===item.title;
+            return (
+              <div key={item.title} className="rounded-2xl border overflow-hidden" style={{ background:"#1A0C04", borderColor:open?"#5C3518":"#2A1408" }}>
+                <button onClick={()=>setOpenItem(open?null:item.title)} className="w-full p-4 text-left flex items-center justify-between gap-4">
+                  <div><p className="font-display font-bold" style={{ color:"#F5ECD7" }}>{item.title}</p><p className="text-xs mt-1" style={{ color:"#7A5C3E" }}>{item.mechanic}</p></div>
+                  <span className="text-xl" style={{ color:"#D4A853" }}>{open?"−":"+"}</span>
+                </button>
+                {open && (
+                  <div className="px-4 pb-4 screen-enter">
+                    <div className="rounded-xl border p-3 mb-3" style={{ background:"#120A04", borderColor:"#3D1F0A" }}>
+                      <p className="text-xs uppercase tracking-widest mb-1" style={{ color:"#D4A853" }}>Ejemplo práctico</p>
+                      <p className="text-sm leading-relaxed" style={{ color:"#EDE0C4" }}>{item.example}</p>
+                    </div>
+                    <p className="text-xs uppercase tracking-widest mb-2" style={{ color:"#5C3518" }}>Cómo resolverlo</p>
+                    <div className="space-y-2">
+                      {item.steps.map((step,index)=><div key={step} className="flex gap-3 text-sm"><span className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold" style={{ background:"rgba(212,168,83,0.12)", color:"#D4A853" }}>{index+1}</span><p style={{ color:"#7A5C3E" }}>{step}</p></div>)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── ProfileScreen ─────────────────────────────────────────────────────────────
 function ProfileScreen({ user, stats, onLoginClick, onLogout }: { user: User|null; stats: Stats; onLoginClick: () => void; onLogout: () => void }) {
   const earned = stats.completedBooksHard ?? [];
+  const masteredCount = BOOKS.filter(book=>["easy","medium","hard"].every(level=>(stats.completedLevels??[]).includes(`${book.id}:${level}`))).length;
   const allBadges = BOOKS.map(b => ({
     book: b,
     earned: earned.includes(b.id),
@@ -631,7 +916,7 @@ function ProfileScreen({ user, stats, onLoginClick, onLogout }: { user: User|nul
   const statItems = [
     { label:"Racha actual", value:`${stats.streak} días`, icon:"🔥" },
     { label:"Puntos totales", value:`${stats.points}`, icon:"⭐" },
-    { label:"Libros completados", value:`${(stats.completedBooks??[]).length}`, icon:"📖" },
+    { label:"Libros al 100%", value:`${masteredCount}`, icon:"📖" },
     { label:"Medallas", value:`${earned.length} / ${BOOKS.length}`, icon:"🏅" },
     { label:"Debates publicados", value:`${stats.totalDebates??0}`, icon:"⚖️" },
     { label:"Posts en foro", value:`${stats.totalForumPosts??0}`, icon:"💬" },
@@ -671,6 +956,21 @@ function ProfileScreen({ user, stats, onLoginClick, onLogout }: { user: User|nul
                   <div className="text-xs mt-0.5" style={{ color:"#5C3518" }}>{label}</div>
                 </div>
               ))}
+            </div>
+
+            <div className="rounded-2xl border p-5 mb-8" style={{ background:"linear-gradient(135deg,rgba(212,168,83,0.1),#1A0C04)", borderColor:"#3D1F0A" }}>
+              <p className="text-xs tracking-widest uppercase mb-2" style={{ color:"#D4A853" }}>Tu respuesta con más apoyos</p>
+              {stats.bestDebateResponse ? (
+                <>
+                  <p className="text-sm leading-relaxed mb-3" style={{ color:"#EDE0C4" }}>“{stats.bestDebateResponse.text}”</p>
+                  <div className="flex items-center justify-between text-xs">
+                    <span style={{ color:"#7A5C3E" }}>{stats.bestDebateResponse.bookTitle}</span>
+                    <span className="font-bold" style={{ color:"#D4A853" }}>{stats.bestDebateResponse.likes} me gusta</span>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm" style={{ color:"#5C3518" }}>Publica un argumento en un debate. Aquí aparecerá el que reciba más apoyo.</p>
+              )}
             </div>
 
             {/* Streak bar */}
@@ -718,6 +1018,9 @@ function ProfileScreen({ user, stats, onLoginClick, onLogout }: { user: User|nul
 
 // ── HomeScreen ────────────────────────────────────────────────────────────────
 function HomeScreen({ user, stats, onBook }: { user: User|null; stats: Stats; onBook: (b: Book) => void }) {
+  const isMastered = (book: Book) => ["easy","medium","hard"].every(level => (stats.completedLevels??[]).includes(`${book.id}:${level}`));
+  const masteredBooks = BOOKS.filter(isMastered);
+  const pendingBooks = BOOKS.filter(book=>!isMastered(book));
   return (
     <div className="min-h-screen pb-20 sm:pb-8 screen-enter" style={{ background:"#120A04" }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
@@ -740,27 +1043,34 @@ function HomeScreen({ user, stats, onBook }: { user: User|null; stats: Stats; on
           </div>
         </div>
 
-        {/* Section header */}
-        <h3 className="font-display text-xl font-semibold mb-4" style={{ color:"#F5ECD7" }}>
-          Biblioteca · <span style={{ color:"#D4A853" }}>{BOOKS.length} obras</span>
-        </h3>
-
-        {/* Bookshelf — 4 per row on mobile, 6-7 on desktop */}
-        {(() => {
-          const perRow = typeof window !== "undefined" && window.innerWidth >= 1024 ? 7 : 4;
-          const rows = [];
-          for (let i = 0; i < BOOKS.length; i += perRow) rows.push(BOOKS.slice(i, i + perRow));
-          return rows.map((rowBooks, row) => (
-            <div key={row} className="mb-5">
-              <div className="relative rounded-2xl overflow-hidden py-5 sm:py-7" style={{ background:"#1A0A04", border:"1px solid #2A1408" }}>
-                <div className="absolute bottom-0 left-0 right-0 h-3 sm:h-4" style={{ background:"#3D1F0A", boxShadow:"0 4px 16px rgba(0,0,0,0.5)" }} />
-                <div className="flex items-end justify-center gap-2 sm:gap-3 lg:gap-5 px-4 sm:px-8 lg:px-12 pb-3 sm:pb-4">
-                  {rowBooks.map(book => <BookSpine key={book.id} book={book} completed={(stats.completedBooks??[]).includes(book.id)} onClick={() => onBook(book)} />)}
-                </div>
+        {[
+          { title:"Por investigar", subtitle:"Completa Fácil, Medio y Difícil", books:pendingBooks, mastered:false },
+          { title:"Archivo dominado", subtitle:"Obras completadas al 100%", books:masteredBooks, mastered:true },
+        ].map(section => (
+          <section key={section.title} className="mb-7">
+            <div className="flex items-end justify-between mb-3">
+              <div>
+                <h3 className="font-display text-xl font-semibold" style={{ color:section.mastered?"#D4A853":"#F5ECD7" }}>{section.title}</h3>
+                <p className="text-xs mt-0.5" style={{ color:"#5C3518" }}>{section.subtitle}</p>
               </div>
+              <span className="text-xs" style={{ color:"#7A5C3E" }}>{section.books.length} obras</span>
             </div>
-          ));
-        })()}
+            <div className="relative rounded-2xl overflow-hidden py-5 sm:py-7 min-h-48" style={{ background:section.mastered?"linear-gradient(135deg,#221404,#1A0A04)":"#1A0A04", border:`1px solid ${section.mastered?"#5C3518":"#2A1408"}` }}>
+              <div className="absolute bottom-0 left-0 right-0 h-3 sm:h-4" style={{ background:section.mastered?"#7A5424":"#3D1F0A", boxShadow:"0 4px 16px rgba(0,0,0,0.5)" }} />
+              {section.books.length ? (
+                <div className="flex items-end gap-2 sm:gap-3 lg:gap-5 px-5 sm:px-8 pb-3 sm:pb-4 overflow-x-auto">
+                  {section.books.map(book => <BookSpine key={book.id} book={book} completed={section.mastered} onClick={() => onBook(book)} />)}
+                </div>
+              ) : (
+                <div className="h-36 flex flex-col items-center justify-center text-center px-6">
+                  <div className="w-10 h-10 rounded-full border flex items-center justify-center mb-2" style={{ borderColor:"#5C3518", color:"#D4A853" }}>✦</div>
+                  <p className="text-sm" style={{ color:"#7A5C3E" }}>Tu primer sello dorado aparecerá aquí.</p>
+                  <p className="text-xs mt-1" style={{ color:"#3D1F0A" }}>Supera los tres niveles de una obra.</p>
+                </div>
+              )}
+            </div>
+          </section>
+        ))}
 
         {/* List */}
         <h3 className="font-display text-sm sm:text-base font-medium mb-3 mt-6" style={{ color:"#5C3518", letterSpacing:"0.1em", textTransform:"uppercase" }}>Todas las obras</h3>
@@ -771,7 +1081,7 @@ function HomeScreen({ user, stats, onBook }: { user: User|null; stats: Stats; on
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-sm sm:text-base truncate" style={{ color:"#F5ECD7" }}>{book.title}</span>
-                  {(stats.completedBooks??[]).includes(book.id) && <span className="flex-shrink-0 text-xs px-1.5 py-0.5 rounded" style={{ background:"rgba(212,168,83,0.15)", color:"#D4A853" }}>✓</span>}
+                  {isMastered(book) && <span className="flex-shrink-0 text-xs px-1.5 py-0.5 rounded font-bold" style={{ background:"rgba(212,168,83,0.15)", color:"#D4A853" }}>100%</span>}
                 </div>
                 <span className="text-xs sm:text-sm" style={{ color:"#5C3518" }}>{book.author} · {book.year}</span>
               </div>
@@ -801,6 +1111,10 @@ function BookSpine({ book, completed, onClick }: { book: Book; completed: boolea
 // ── BookDetailScreen ──────────────────────────────────────────────────────────
 type BookMode = "quiz"|"flashcards"|"debate"|"forum";
 function BookDetailScreen({ book, stats, onMode, onBack }: { book: Book; stats: Stats; onMode: (m: BookMode) => void; onBack: () => void }) {
+  const completed = ["easy","medium","hard"].every(level=>(stats.completedLevels??[]).includes(`${book.id}:${level}`));
+  const medalEarned = (stats.completedBooksHard??[]).includes(book.id);
+  const experience = getBookExperience(book);
+  const completedLevels = (stats.completedLevels??[]).filter(level=>level.startsWith(`${book.id}:`)).length;
   return (
     <div className="min-h-screen pb-20 sm:pb-8 screen-enter" style={{ background:"#120A04" }}>
       <div className="max-w-2xl mx-auto px-4 py-6">
@@ -817,6 +1131,38 @@ function BookDetailScreen({ book, stats, onMode, onBack }: { book: Book; stats: 
               <p className="text-sm italic" style={{ color:"#D4A853" }}>"{book.tagline}"</p>
             </div>
           </div>
+          <div className="grid grid-cols-3 border-t" style={{ borderColor:"#2A1408" }}>
+            {[
+              ["Ruta", completed?"Completada":"Pendiente"],
+              ["Tarjetas", `${book.flashcards.length}+`],
+              ["Medalla", medalEarned?"Obtenida":"Por ganar"],
+            ].map(([label,value]) => (
+              <div key={label} className="px-3 py-3 text-center border-r last:border-r-0" style={{ borderColor:"#2A1408" }}>
+                <div className="text-xs mb-0.5" style={{ color:"#5C3518" }}>{label}</div>
+                <div className="text-xs font-semibold" style={{ color:"#D4A853" }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid sm:grid-cols-[1.35fr_1fr] gap-3 mb-6">
+          <div className="rounded-2xl border p-4" style={{ background:"#1A0C04", borderColor:"#2A1408" }}>
+            <p className="text-xs tracking-widest uppercase mb-2" style={{ color:"#5C3518" }}>De qué trata</p>
+            <p className="text-sm leading-relaxed" style={{ color:"#EDE0C4" }}>{experience.description}</p>
+          </div>
+          <div className="rounded-2xl border p-4" style={{ background:`linear-gradient(135deg,${book.color}22,#1A0C04)`, borderColor:book.color+"55" }}>
+            <p className="text-xs tracking-widest uppercase mb-2" style={{ color:"#5C3518" }}>Tu rol</p>
+            <p className="font-display font-bold mb-1" style={{ color:"#D4A853" }}>{experience.role}</p>
+            <p className="text-xs leading-relaxed" style={{ color:"#7A5C3E" }}>{experience.setting}</p>
+          </div>
+        </div>
+
+        <div className="flex items-end justify-between gap-4 mb-3">
+          <div>
+            <p className="text-xs tracking-widest uppercase mb-1" style={{ color:"#5C3518" }}>Mesa de estudio</p>
+            <h2 className="font-display text-xl font-semibold" style={{ color:"#F5ECD7" }}>Profundiza en la obra</h2>
+          </div>
+          <span className="text-xs text-right" style={{ color:"#5C3518" }}>{completedLevels}/3 niveles superados</span>
         </div>
 
         {/* Primary CTA: Quiz */}
@@ -829,16 +1175,17 @@ function BookDetailScreen({ book, stats, onMode, onBack }: { book: Book; stats: 
                 <span className="font-display font-bold text-lg" style={{ color:"#F5ECD7" }}>Quiz Crítico</span>
                 <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background:"#D4A853", color:"#120A04" }}>Principal</span>
               </div>
-              <p className="text-sm" style={{ color:"#7A5C3E" }}>3 dificultades · Fácil · Medio · Difícil</p>
-              <p className="text-xs mt-1" style={{ color:"#5C3518" }}>{book.questions.length} preguntas · +10 pts por respuesta</p>
+              <p className="text-sm" style={{ color:"#7A5C3E" }}>Evidencia, falacias, orden lógico y posturas</p>
+              <p className="text-xs mt-1" style={{ color:"#5C3518" }}>5 fácil · 8 medio · 11 difícil</p>
             </div>
             <span className="text-2xl" style={{ color:book.color }}>›</span>
           </div>
         </button>
 
         {/* Secondary modes */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {([
+            {mode:"flashcards",icon:"▤",title:"Flashcards",desc:`${book.flashcards.length} del libro + las tuyas`,color:"#D4A853"},
             {mode:"debate",icon:"⚖️",title:"Debate",desc:"Argumenta y compite por likes",color:"#7A3A9A"},
             {mode:"forum",icon:"💬",title:"Foro",desc:"Preguntas y respuestas",color:"#1A6A8A"},
           ] as {mode:BookMode,icon:string,title:string,desc:string,color:string}[]).map(({mode,icon,title,desc,color}) => (
@@ -861,11 +1208,11 @@ function QuizDifficultyScreen({ book, onSelect, onBack }: { book: Book; onSelect
     medium: book.questions.filter(q => q.difficulty === "medium").length,
     hard: book.questions.filter(q => q.difficulty === "hard").length,
   };
-  const nMap: Record<Difficulty,number> = { easy:5, medium:7, hard:10 };
+  const nMap: Record<Difficulty,number> = { easy:5, medium:8, hard:11 };
   const difficulties: { d: Difficulty; label: string; emoji: string; color: string; bg: string; pts: string; note: string }[] = [
     { d:"easy", label:"Fácil", emoji:"🌱", color:"#5C8A3E", bg:"rgba(92,138,62,0.15)", pts:"+8 pts/correcta", note:"Conceptos básicos · 5 preguntas" },
-    { d:"medium", label:"Medio", emoji:"⚡", color:"#D4A853", bg:"rgba(212,168,83,0.12)", pts:"+10 pts/correcta", note:"Análisis profundo · 7 preguntas" },
-    { d:"hard", label:"Difícil", emoji:"💀", color:"#C87941", bg:"rgba(200,121,65,0.15)", pts:"+15 pts/correcta · Medalla si perfecto", note:"Síntesis y crítica · 10 preguntas" },
+    { d:"medium", label:"Medio", emoji:"⚡", color:"#D4A853", bg:"rgba(212,168,83,0.12)", pts:"+10 pts/correcta", note:"Evidencia y estructura · 8 preguntas" },
+    { d:"hard", label:"Difícil", emoji:"💀", color:"#C87941", bg:"rgba(200,121,65,0.15)", pts:"+15 pts/correcta · Medalla si perfecto", note:"Síntesis, posturas y falacias · 11 preguntas" },
   ];
   return (
     <div className="min-h-screen pb-20 sm:pb-8 screen-enter" style={{ background:"#120A04" }}>
@@ -897,30 +1244,87 @@ function QuizDifficultyScreen({ book, onSelect, onBack }: { book: Book; onSelect
 }
 
 // ── QuizScreen ────────────────────────────────────────────────────────────────
-function QuizScreen({ book, user, difficulty, onDone, onBack }: { book: Book; user: User|null; difficulty: Difficulty; onDone: (pts: number, perfect: boolean) => void; onBack: () => void }) {
+function QuizScreen({ book, user, stats, difficulty, onDone, onBack }: { book: Book; user: User|null; stats: Stats; difficulty: Difficulty; onDone: (pts: number, perfect: boolean) => void; onBack: () => void }) {
   const ptsMap: Record<Difficulty,number> = { easy:8, medium:10, hard:15 };
-  const nMap: Record<Difficulty,number> = { easy:5, medium:7, hard:10 };
+  const nMap: Record<Difficulty,number> = { easy:5, medium:8, hard:11 };
   const N = nMap[difficulty];
-  const [questions] = useState(() => selectQuestions(book.questions, N, difficulty));
+  const [questions] = useState(() => buildQuizQuestions(book, difficulty));
   const [current, setCurrent] = useState(0); const [selected, setSelected] = useState<number|null>(null);
   const [answered, setAnswered] = useState(false); const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false); const [highlight, setHighlight] = useState<string|null>(null);
+  const [started, setStarted] = useState(false); const [showHint, setShowHint] = useState(false);
+  const [ordered, setOrdered] = useState<string[]>([]);
+  const [matches, setMatches] = useState<Record<string,string>>({});
+  const [activeMatch, setActiveMatch] = useState<string|null>(null);
+  const [swipeStart, setSwipeStart] = useState<number|null>(null);
+  const [noiseSelected, setNoiseSelected] = useState<string[]>([]);
+  const [hintCard, setHintCard] = useState<Flashcard|null>(null);
   const q = questions[current];
+  const experience = getBookExperience(book);
   const isHL = q.mode === "highlight";
   const pct = ((current+(answered?1:0))/N)*100;
 
+  function completeAnswer(isCorrect: boolean) {
+    if (answered) return;
+    setAnswered(true);
+    if (isCorrect) setScore(s=>s+1);
+  }
   function choose(i: number) {
-    if (answered) return; setSelected(i); setAnswered(true);
-    if (i===q.correct) setScore(s=>s+1);
+    if (answered) return; setSelected(i); completeAnswer(i===q.correct);
   }
   function chooseHL(s: string) {
-    if (answered) return; setHighlight(s); setAnswered(true);
-    if (s===q.correctHighlight) setScore(sc=>sc+1);
+    if (answered) return; setHighlight(s); completeAnswer(s===q.correctHighlight);
+  }
+  function submitOrder() {
+    const correctOrder = q.orderItems??[];
+    completeAnswer(ordered.every((item,index) => item===correctOrder[index]));
+  }
+  function connectMatch(right: string) {
+    if (!activeMatch || answered) return;
+    setMatches(prev => {
+      const next = { ...prev };
+      Object.keys(next).forEach(key => { if (next[key]===right) delete next[key]; });
+      next[activeMatch] = right;
+      return next;
+    });
+    setActiveMatch(null);
+  }
+  function submitMatches() {
+    completeAnswer((q.matchPairs??[]).every(pair => matches[pair.left]===pair.right));
+  }
+  function submitNoise() {
+    const expected=q.noiseWords??[];
+    completeAnswer(noiseSelected.length===expected.length && expected.every(word=>noiseSelected.includes(word)));
   }
   function next() {
-    if (current<N-1) { setCurrent(c=>c+1); setSelected(null); setAnswered(false); setHighlight(null); }
+    if (current<N-1) {
+      setCurrent(c=>c+1); setSelected(null); setAnswered(false); setHighlight(null);
+      setOrdered([]); setMatches({}); setActiveMatch(null); setSwipeStart(null); setNoiseSelected([]); setHintCard(null); setShowHint(false);
+    }
     else { const pts=score*ptsMap[difficulty]; const perfect=score===N; setFinished(true); if(user) awardPoints(user.uid,pts); onDone(pts,perfect); }
   }
+
+  if (!started) return (
+    <div className="min-h-screen flex items-center justify-center p-4 screen-enter" style={{ background:"#120A04" }}>
+      <div className="max-w-lg w-full rounded-3xl border overflow-hidden" style={{ background:"#1A0C04", borderColor:"#3D1F0A" }}>
+        <div className="h-2" style={{ background:`linear-gradient(90deg,${book.color},#D4A853)` }} />
+        <div className="p-6 sm:p-8">
+          <button onClick={onBack} className="text-sm mb-8" style={{ color:"#7A5C3E" }}>‹ Volver al libro</button>
+          <p className="text-xs tracking-[0.25em] uppercase mb-2" style={{ color:"#D4A853" }}>Expediente · {experience.setting}</p>
+          <h2 className="font-display text-3xl font-bold mb-2" style={{ color:"#F5ECD7" }}>{experience.role}</h2>
+          <p className="text-sm leading-relaxed mb-6" style={{ color:"#7A5C3E" }}>{experience.mission}</p>
+          <div className="rounded-2xl border p-4 mb-6" style={{ background:"#120A04", borderColor:"#2A1408" }}>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div><p className="font-display font-bold" style={{ color:"#D4A853" }}>{N}</p><p className="text-xs" style={{ color:"#5C3518" }}>casos</p></div>
+              <div><p className="font-display font-bold" style={{ color:"#D4A853" }}>{difficulty==="easy"?"Guiado":difficulty==="medium"?"Analítico":"Experto"}</p><p className="text-xs" style={{ color:"#5C3518" }}>modo</p></div>
+              <div><p className="font-display font-bold" style={{ color:"#D4A853" }}>+{ptsMap[difficulty]}</p><p className="text-xs" style={{ color:"#5C3518" }}>por acierto</p></div>
+            </div>
+          </div>
+          <button onClick={()=>setStarted(true)} className="w-full py-3.5 rounded-2xl font-bold" style={{ background:"#D4A853", color:"#120A04" }}>Abrir expediente</button>
+        </div>
+      </div>
+    </div>
+  );
 
   if (finished) return (
     <div className="min-h-screen flex items-center justify-center p-4 screen-enter" style={{ background:"#120A04" }}>
@@ -939,13 +1343,32 @@ function QuizScreen({ book, user, difficulty, onDone, onBack }: { book: Book; us
     </div>
   );
 
-  const correct = selected===q.correct || (isHL&&highlight===q.correctHighlight);
+  const correct = selected===q.correct
+    || (isHL&&highlight===q.correctHighlight)
+    || (q.mode==="reorder" && ordered.every((item,index) => item===(q.orderItems??[])[index]))
+    || (q.mode==="match" && (q.matchPairs??[]).every(pair => matches[pair.left]===pair.right))
+    || (q.mode==="noise" && noiseSelected.length===(q.noiseWords??[]).length && (q.noiseWords??[]).every(word=>noiseSelected.includes(word)));
+  const modeLabels: Record<Question["mode"],string> = {
+    critical:"Análisis crítico", fragment:"Lectura cercana", highlight:"Inspector de evidencia",
+    reorder:"Orden argumentativo", match:"Match de posturas", fallacy:"Cartas de falacia", verdict:"Veredicto rápido",
+    agenda:"La Agenda Oculta", stress:"Prueba de Estrés", noise:"Filtro de Ruido",
+  };
+  const fallacyDefinitions: Record<string,string> = {
+    "Sesgo de nostalgia":"Idealiza el pasado y usa ese recuerdo selectivo como si fuera evidencia objetiva.",
+    "Ad Hominem":"Ataca a la persona que sostiene una idea en lugar de responder a sus razones.",
+    "Hombre de Paja":"Deforma una postura para refutar una versión más débil que nadie defendió.",
+    "Falsa Equivalencia":"Presenta como iguales dos casos cuyas diferencias son relevantes.",
+    "Causa falsa":"Afirma causalidad solo porque dos hechos coinciden o uno ocurre antes que el otro.",
+  };
   return (
     <div className="min-h-screen pb-20 sm:pb-8 screen-enter" style={{ background:"#120A04" }}>
       <div className="max-w-xl mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-4">
           <button onClick={onBack} className="text-sm hover:opacity-70" style={{ color:"#7A5C3E" }}>‹ {book.title}</button>
-          <span className="text-xs px-2 py-1 rounded-full" style={{ background:"#2A1408", color:{"easy":"#5C8A3E","medium":"#D4A853","hard":"#C87941"}[difficulty] }}>{{easy:"🌱 Fácil",medium:"⚡ Medio",hard:"💀 Difícil"}[difficulty]}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs px-2 py-1 rounded-full" style={{ background:"rgba(217,119,6,0.12)", color:"#D97706" }}>🔥 {stats.streak}</span>
+            <span className="text-xs px-2 py-1 rounded-full" style={{ background:"#2A1408", color:{"easy":"#5C8A3E","medium":"#D4A853","hard":"#C87941"}[difficulty] }}>{{easy:"🌱 Fácil",medium:"⚡ Medio",hard:"💀 Difícil"}[difficulty]}</span>
+          </div>
         </div>
         {/* Progress */}
         <div className="mb-5">
@@ -956,14 +1379,138 @@ function QuizScreen({ book, user, difficulty, onDone, onBack }: { book: Book; us
             <div className="h-full rounded-full transition-all duration-500" style={{ width:`${pct}%`, background:"#D4A853" }} />
           </div>
         </div>
-        <span className="text-xs" style={{ color:"#5C3518" }}>#{q.concept}</span>
-        {q.fragment && (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs" style={{ color:"#5C3518" }}>#{q.concept}</span>
+          <span className="text-xs px-2 py-1 rounded-full border" style={{ color:"#7A5C3E", borderColor:"#2A1408" }}>{modeLabels[q.mode]}</span>
+        </div>
+        {difficulty==="easy" && !answered && (
+          <div className="mt-3">
+            <button onClick={()=>setShowHint(v=>!v)} className="text-xs px-3 py-2 rounded-xl border font-semibold" style={{ background:showHint?"rgba(212,168,83,0.12)":"#1A0C04", borderColor:"#3D1F0A", color:"#D4A853" }}>Pista</button>
+            {showHint && (
+              <div className="mt-2 rounded-xl border p-3 screen-enter" style={{ background:"rgba(212,168,83,0.08)", borderColor:"#3D1F0A" }}>
+                <p className="text-xs uppercase tracking-widest mb-1" style={{ color:"#D4A853" }}>Qué debes analizar</p>
+                <p className="text-sm leading-relaxed" style={{ color:"#EDE0C4" }}>{questionHint(q)}</p>
+              </div>
+            )}
+          </div>
+        )}
+        {difficulty!=="hard" && !answered && (
+          <div className="mt-3">
+            {!hintCard ? (
+              <button onClick={() => setHintCard(book.flashcards[Math.floor(Math.random()*book.flashcards.length)])} className="text-xs px-3 py-2 rounded-xl border" style={{ background:"#1A0C04", borderColor:"#3D1F0A", color:"#D4A853" }}>
+                Sacar una flashcard de apoyo
+              </button>
+            ) : (
+              <div className="rounded-xl border p-3" style={{ background:"#1A0C04", borderColor:"#3D1F0A" }}>
+                <p className="text-xs uppercase tracking-widest mb-1" style={{ color:"#5C3518" }}>Apunte aleatorio</p>
+                <p className="text-sm font-semibold mb-1" style={{ color:"#D4A853" }}>{hintCard.front}</p>
+                <p className="text-xs leading-relaxed" style={{ color:"#7A5C3E" }}>{hintCard.back}</p>
+              </div>
+            )}
+          </div>
+        )}
+        {q.fragment && q.mode!=="noise" && (
           <blockquote className="rounded-2xl p-4 my-4 border-l-4 text-sm leading-relaxed italic" style={{ background:"#1A0C04", borderColor:"#3D1F0A", color:"#EDE0C4" }}>
             {isHL && !answered ? <HighlightableText text={q.fragment} onSelect={chooseHL} options={q.options} /> : q.fragment}
           </blockquote>
         )}
         <h2 className="font-display text-xl font-semibold my-4" style={{ color:"#F5ECD7" }}>{q.text}</h2>
-        {!isHL && (
+        {q.mode==="reorder" && (
+          <div className="space-y-3">
+            <div className="rounded-2xl border p-3 min-h-28" style={{ background:"#1A0C04", borderColor:"#3D1F0A" }}>
+              <p className="text-xs uppercase tracking-widest mb-2" style={{ color:"#5C3518" }}>Estructura construida</p>
+              {ordered.length===0 ? <p className="text-sm" style={{ color:"#3D1F0A" }}>Selecciona los enunciados en el orden correcto.</p> :
+                ordered.map((item,index) => (
+                  <div key={item} className="flex gap-2 py-2 border-b last:border-b-0 text-sm" style={{ borderColor:"#2A1408", color:"#EDE0C4" }}>
+                    <span className="font-bold" style={{ color:"#D4A853" }}>{index+1}</span><span>{item}</span>
+                  </div>
+                ))}
+            </div>
+            <div className="space-y-2">
+              {shuffled(q.orderItems??[]).map(item => (
+                <button key={item} disabled={answered||ordered.includes(item)} onClick={() => setOrdered(prev=>[...prev,item])} className="w-full text-left px-4 py-3 rounded-xl border text-sm disabled:opacity-30" style={{ background:"#1A0C04", borderColor:"#2A1408", color:"#F5ECD7" }}>{item}</button>
+              ))}
+            </div>
+            {!answered && <div className="flex gap-2">
+              <button onClick={() => setOrdered([])} className="px-4 py-2.5 rounded-xl border text-sm" style={{ borderColor:"#2A1408", color:"#7A5C3E" }}>Reiniciar</button>
+              <button onClick={submitOrder} disabled={ordered.length!==(q.orderItems??[]).length} className="flex-1 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40" style={{ background:"#D4A853", color:"#120A04" }}>Comprobar estructura</button>
+            </div>}
+          </div>
+        )}
+        {q.mode==="match" && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              {(q.matchPairs??[]).map(pair => (
+                <button key={pair.left} onClick={()=>setActiveMatch(pair.left)} disabled={answered} className="w-full text-left p-3 rounded-xl border text-sm" style={{ background:activeMatch===pair.left?"rgba(212,168,83,0.14)":"#1A0C04", borderColor:matches[pair.left]?"#D4A853":"#2A1408", color:"#F5ECD7" }}>
+                  <span className="block text-xs mb-1" style={{ color:"#5C3518" }}>Concepto</span>{pair.left}
+                </button>
+              ))}
+            </div>
+            <div className="space-y-2">
+              {shuffled(q.matchPairs??[]).map(pair => {
+                const used = Object.values(matches).includes(pair.right);
+                return <button key={pair.right} onClick={()=>connectMatch(pair.right)} disabled={answered||!activeMatch} className="w-full text-left p-3 rounded-xl border text-xs leading-relaxed disabled:opacity-50" style={{ background:used?"rgba(92,138,62,0.12)":"#1A0C04", borderColor:used?"#5C8A3E":"#2A1408", color:"#EDE0C4" }}>{pair.right}</button>;
+              })}
+            </div>
+            {!answered && <button onClick={submitMatches} disabled={Object.keys(matches).length!==(q.matchPairs??[]).length} className="col-span-2 py-3 rounded-xl text-sm font-bold disabled:opacity-40" style={{ background:"#D4A853", color:"#120A04" }}>Comprobar conexiones</button>}
+          </div>
+        )}
+        {q.mode==="verdict" && (
+          <div className="grid grid-cols-2 gap-3" onTouchStart={e=>setSwipeStart(e.touches[0].clientX)} onTouchEnd={e=>{
+            if (swipeStart===null || answered) return;
+            const distance=e.changedTouches[0].clientX-swipeStart;
+            if (Math.abs(distance)>50) choose(distance<0?0:1);
+            setSwipeStart(null);
+          }}>
+            {q.options.map((opt,i) => (
+              <button key={opt} onClick={()=>choose(i)} disabled={answered} className="rounded-2xl border p-5 text-left transition-all" style={{ background:answered&&i===q.correct?"rgba(92,138,62,0.2)":answered&&i===selected?"rgba(139,26,26,0.2)":"#1A0C04", borderColor:answered&&i===q.correct?"#5C8A3E":answered&&i===selected?"#8B1A1A":"#2A1408", color:"#F5ECD7" }}>
+                <span className="block text-2xl mb-3">{i===0?"←":"→"}</span>
+                <span className="text-sm font-bold">{opt}</span>
+              </button>
+            ))}
+            <p className="col-span-2 text-center text-xs" style={{ color:"#5C3518" }}>Izquierda: válido · Derecha: falacia o afirmación sin sustento</p>
+          </div>
+        )}
+        {q.mode==="agenda" && (
+          <div>
+            <p className="text-xs uppercase tracking-widest mb-2" style={{ color:"#5C3518" }}>Perfiles de interés</p>
+            <div className="grid gap-2">
+              {q.options.map((opt,i)=>(
+                <button key={opt} onClick={()=>choose(i)} disabled={answered} className="w-full rounded-2xl border p-4 text-left flex items-center gap-3 transition-all" style={{ background:answered&&i===q.correct?"rgba(16,185,129,0.14)":answered&&i===selected?"rgba(190,24,93,0.14)":"#1A0C04", borderColor:answered&&i===q.correct?"#10B981":answered&&i===selected?"#BE185D":"#2A1408", color:"#F5ECD7" }}>
+                  <span className="w-9 h-9 rounded-xl flex items-center justify-center font-display font-bold" style={{ background:"#2A1408", color:"#D4A853" }}>{i+1}</span>
+                  <span className="text-sm font-semibold">{opt}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {q.mode==="stress" && (
+          <div>
+            <div className="rounded-2xl border p-4 mb-4 relative overflow-hidden" style={{ background:"rgba(15,23,42,0.72)", borderColor:answered?(correct?"#10B981":"#BE185D"):"#475569" }}>
+              <div className="flex justify-between text-xs mb-2"><span style={{ color:"#94A3B8" }}>Tensión lógica</span><span className="font-bold" style={{ color:answered?(correct?"#10B981":"#BE185D"):"#D4A853" }}>{answered?(correct?"100%":"35%"):"0%"}</span></div>
+              <div className="h-2 rounded-full overflow-hidden" style={{ background:"#0F172A" }}><div className="h-full transition-all duration-500" style={{ width:answered?(correct?"100%":"35%"):"0%", background:correct?"#10B981":"#BE185D" }} /></div>
+              {answered&&correct&&<div className="absolute inset-0 opacity-20" style={{ background:"repeating-linear-gradient(45deg,transparent,transparent 18px,#F5ECD7 19px,transparent 20px)" }} />}
+            </div>
+            <p className="text-xs uppercase tracking-widest mb-2" style={{ color:"#5C3518" }}>Hipótesis disponibles</p>
+            <div className="space-y-2">
+              {q.options.map((opt,i)=><button key={opt} onClick={()=>choose(i)} disabled={answered} className="w-full rounded-xl border p-3 text-left text-sm" style={{ background:answered&&i===q.correct?"rgba(16,185,129,0.12)":"#1A0C04", borderColor:answered&&i===q.correct?"#10B981":answered&&i===selected?"#BE185D":"#2A1408", color:"#EDE0C4" }}>{opt}</button>)}
+            </div>
+          </div>
+        )}
+        {q.mode==="noise" && q.fragment && (
+          <div>
+            <div className="rounded-2xl border p-5 leading-8 text-base mb-3" style={{ background:"#172033", borderColor:"#334155", color:"#F8FAFC" }}>
+              {q.fragment.split(new RegExp(`(${(q.noiseWords??[]).join("|")})`,"g")).map((part,index)=>{
+                const removable=(q.noiseWords??[]).includes(part);
+                const crossed=noiseSelected.includes(part);
+                return removable ? <button key={`${part}-${index}`} onClick={()=>!answered&&setNoiseSelected(prev=>prev.includes(part)?prev.filter(word=>word!==part):[...prev,part])} className="px-1 rounded transition-all" style={{ color:crossed?"#94A3B8":"#FBBF24", textDecoration:crossed?"line-through":"none", background:crossed?"rgba(148,163,184,0.12)":"rgba(217,119,6,0.14)" }}>{part}</button> : <span key={`${part}-${index}`}>{part}</span>;
+              })}
+            </div>
+            <p className="text-xs mb-3" style={{ color:"#7A5C3E" }}>{noiseSelected.length} expresiones marcadas · toca de nuevo para restaurar</p>
+            {!answered&&<button onClick={submitNoise} disabled={noiseSelected.length===0} className="w-full py-3 rounded-xl font-bold text-sm disabled:opacity-40" style={{ background:"#D4A853", color:"#120A04" }}>Aplicar filtro</button>}
+          </div>
+        )}
+        {!isHL && !["reorder","match","verdict","agenda","stress","noise"].includes(q.mode) && (
           <div className="space-y-2.5">
             {q.options.map((opt,i) => {
               let bg="#1A0C04", border="#2A1408", color="#F5ECD7";
@@ -973,17 +1520,23 @@ function QuizScreen({ book, user, difficulty, onDone, onBack }: { book: Book; us
                 else {color="#3D1F0A";}
               } else if (selected===i){border="#D4A853";}
               return (
-                <button key={i} onClick={()=>choose(i)} disabled={answered} className="w-full text-left px-4 py-3.5 rounded-2xl border text-sm transition-all" style={{ background:bg, borderColor:border, color }}>
+                <button key={i} onClick={()=>choose(i)} disabled={answered} className={`w-full text-left px-4 py-3.5 border text-sm transition-all ${q.mode==="fallacy"?"rounded-xl":"rounded-2xl"}`} style={{ background:bg, borderColor:border, color }}>
                   <span className="font-mono mr-3 text-xs opacity-50">{String.fromCharCode(65+i)}</span>{opt}
                 </button>
               );
             })}
           </div>
         )}
+        {answered && q.mode==="fallacy" && selected!==null && (
+          <div className="mt-3 rounded-2xl border p-4" style={{ background:"#1A0C04", borderColor:"#3D1F0A" }}>
+            <p className="text-xs tracking-widest uppercase mb-1" style={{ color:"#D4A853" }}>Carta seleccionada · {q.options[selected]}</p>
+            <p className="text-sm leading-relaxed" style={{ color:"#EDE0C4" }}>{fallacyDefinitions[q.options[selected]]}</p>
+          </div>
+        )}
         {answered && (
-          <div className="mt-4 rounded-2xl p-4 text-sm screen-enter" style={{ background:correct?"rgba(92,138,62,0.15)":"rgba(139,26,26,0.15)", color:"#EDE0C4" }}>
-            <p className="font-bold mb-1" style={{ color:correct?"#9CCF6B":"#F08080" }}>{correct?"✓ Correcto":"✗ Incorrecto"}</p>
-            <p>{correct?q.feedback:q.feedbackAlt}</p>
+          <div className={`mt-4 rounded-2xl p-4 text-sm screen-enter ${q.mode==="stress"?"sticky bottom-4 z-20":""}`} style={{ background:correct?"rgba(16,185,129,0.16)":"rgba(190,24,93,0.18)", border:`1px solid ${correct?"#10B981":"#BE185D"}`, color:"#EDE0C4" }}>
+            <p className="font-bold mb-1" style={{ color:correct?"#6EE7B7":"#FDA4AF" }}>{correct?"¡Evidencia detectada con éxito!":"Trampa lógica detectada"}</p>
+            <p>{correct?q.feedback:selected!==null?`Elegiste «${q.options[selected]}». Esa opción era una trampa de distracción: ${q.feedbackAlt}`:q.feedbackAlt}</p>
           </div>
         )}
         {answered && (
@@ -998,10 +1551,13 @@ function QuizScreen({ book, user, difficulty, onDone, onBack }: { book: Book; us
 function HighlightableText({ text, onSelect, options }: { text: string; onSelect: (s: string) => void; options: string[] }) {
   return (
     <div>
-      <p className="text-xs mb-2 not-italic" style={{ color:"#7A5C3E" }}>Selecciona la frase correcta:</p>
+      <p className="not-italic leading-relaxed mb-4" style={{ color:"#EDE0C4" }}>{text}</p>
+      <p className="text-xs mb-2 not-italic uppercase tracking-widest" style={{ color:"#7A5C3E" }}>Resalta la evidencia exacta</p>
       <div className="space-y-1.5">
         {options.map((opt,i) => (
-          <button key={i} onClick={() => onSelect(opt)} className="block w-full text-left px-3 py-2 rounded-lg border text-sm transition-all hover:border-amber-700 italic" style={{ background:"#120A04", borderColor:"#3D1F0A", color:"#EDE0C4" }}>"{opt}"</button>
+          <button key={i} onClick={() => onSelect(opt)} className="block w-full text-left px-3 py-2 rounded-lg border text-sm transition-all hover:border-amber-700 not-italic" style={{ background:"#120A04", borderColor:"#3D1F0A", color:"#EDE0C4" }}>
+            <span className="mr-2" style={{ color:"#D4A853" }}>▰</span>{opt}
+          </button>
         ))}
       </div>
     </div>
@@ -1010,21 +1566,68 @@ function HighlightableText({ text, onSelect, options }: { text: string; onSelect
 
 // ── FlashcardScreen ───────────────────────────────────────────────────────────
 function FlashcardScreen({ book, onBack }: { book: Book; onBack: () => void }) {
+  const storageKey = `analisis-flashcards-${book.id}`;
   const [idx, setIdx] = useState(0); const [flipped, setFlipped] = useState(false);
-  const cards = book.flashcards; const card = cards[idx];
+  const [creating, setCreating] = useState(false);
+  const [front, setFront] = useState(""); const [back, setBack] = useState("");
+  const [customCards, setCustomCards] = useState<Flashcard[]>(() => {
+    try { return JSON.parse(localStorage.getItem(storageKey)??"[]") as Flashcard[]; } catch { return []; }
+  });
+  const generalCards: Flashcard[] = [
+    { id:"general-author", front:"Autor y publicación", back:`${book.author} · ${book.year}` },
+    { id:"general-genre", front:"Género", back:book.genre },
+    { id:"general-key", front:"Clave de lectura", back:book.tagline },
+  ];
+  const cards = [...generalCards, ...book.flashcards, ...customCards]; const card = cards[idx];
+  function createCard() {
+    if (!front.trim() || !back.trim()) return;
+    const next = [...customCards, { id:`custom-${Date.now()}`, front:front.trim(), back:back.trim() }];
+    setCustomCards(next); localStorage.setItem(storageKey, JSON.stringify(next));
+    setFront(""); setBack(""); setCreating(false); setIdx(cards.length); setFlipped(false);
+  }
   return (
     <div className="min-h-screen pb-20 sm:pb-8 screen-enter" style={{ background:"#120A04" }}>
       <div className="max-w-lg mx-auto px-4 py-6">
         <button onClick={onBack} className="text-sm mb-5 hover:opacity-70 block" style={{ color:"#7A5C3E" }}>‹ {book.title}</button>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display text-xl font-semibold" style={{ color:"#F5ECD7" }}>🃏 Flashcards</h2>
-          <span className="text-sm" style={{ color:"#5C3518" }}>{idx+1}/{cards.length}</span>
+          <div>
+            <h2 className="font-display text-xl font-semibold" style={{ color:"#F5ECD7" }}>Flashcards</h2>
+            <p className="text-xs mt-1" style={{ color:"#5C3518" }}>Datos generales, conceptos y apuntes personales</p>
+          </div>
+          <button onClick={() => setCreating(v=>!v)} className="px-3 py-2 rounded-xl text-xs font-bold border" style={{ background:creating?"#2A1408":"#D4A853", borderColor:"#3D1F0A", color:creating?"#D4A853":"#120A04" }}>{creating?"Cancelar":"+ Crear"}</button>
         </div>
-        <div onClick={() => setFlipped(f=>!f)} className="cursor-pointer rounded-3xl border p-8 min-h-56 flex flex-col items-center justify-center text-center transition-all select-none" style={{ background:flipped?"#2A1408":"#1E0E04", borderColor:flipped?"#5C3518":"#2A1408", transform:flipped?"none":"none" }}>
-          <p className="text-xs tracking-widest uppercase mb-4" style={{ color:"#5C3518" }}>{flipped?"Respuesta":"Pregunta"}</p>
-          <p className="font-display text-lg leading-relaxed" style={{ color:flipped?"#D4A853":"#F5ECD7" }}>{flipped?card.back:card.front}</p>
-          <p className="text-xs mt-4" style={{ color:"#3D1F0A" }}>Toca para {flipped?"ver la pregunta":"ver la respuesta"}</p>
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          {[["Generales",generalCards.length],["Del libro",book.flashcards.length],["Creadas",customCards.length]].map(([label,value]) => (
+            <div key={label} className="rounded-xl border p-3 text-center" style={{ background:"#1A0C04", borderColor:"#2A1408" }}>
+              <div className="font-display text-lg font-bold" style={{ color:"#D4A853" }}>{value}</div>
+              <div className="text-xs" style={{ color:"#5C3518" }}>{label}</div>
+            </div>
+          ))}
         </div>
+        {creating ? (
+          <div className="rounded-2xl border p-4" style={{ background:"#1A0C04", borderColor:"#3D1F0A" }}>
+            <p className="font-semibold text-sm mb-1" style={{ color:"#F5ECD7" }}>Nueva tarjeta de estudio</p>
+            <p className="text-xs mb-4" style={{ color:"#5C3518" }}>Formula una pregunta precisa y una respuesta breve.</p>
+            <label className="text-xs block mb-1.5" style={{ color:"#7A5C3E" }}>Frente / pregunta</label>
+            <input value={front} onChange={e=>setFront(e.target.value)} placeholder="Ej. ¿Qué representa el conflicto central?" className="w-full rounded-xl border px-3 py-2.5 text-sm outline-none mb-3" style={{ background:"#120A04", borderColor:"#3D1F0A", color:"#F5ECD7" }} />
+            <label className="text-xs block mb-1.5" style={{ color:"#7A5C3E" }}>Reverso / respuesta</label>
+            <textarea value={back} onChange={e=>setBack(e.target.value)} rows={4} placeholder="Escribe tu explicación…" className="w-full rounded-xl border px-3 py-2.5 text-sm outline-none resize-none" style={{ background:"#120A04", borderColor:"#3D1F0A", color:"#F5ECD7" }} />
+            <button onClick={createCard} disabled={!front.trim()||!back.trim()} className="w-full mt-3 py-3 rounded-xl text-sm font-bold disabled:opacity-40" style={{ background:"#D4A853", color:"#120A04" }}>Guardar flashcard</button>
+          </div>
+        ) : (
+          <>
+            <div onClick={() => setFlipped(f=>!f)} className="cursor-pointer rounded-3xl border p-8 min-h-56 flex flex-col items-center justify-center text-center transition-all select-none" style={{ background:flipped?"#2A1408":"#1E0E04", borderColor:flipped?"#5C3518":"#2A1408" }}>
+              <div className="flex items-center gap-2 mb-4">
+                <p className="text-xs tracking-widest uppercase" style={{ color:"#5C3518" }}>{flipped?"Respuesta":"Pregunta"}</p>
+                {card.id.startsWith("custom-") && <span className="text-xs px-2 py-0.5 rounded-full" style={{ background:"rgba(212,168,83,0.12)", color:"#D4A853" }}>Tuya</span>}
+              </div>
+              <p className="font-display text-lg leading-relaxed" style={{ color:flipped?"#D4A853":"#F5ECD7" }}>{flipped?card.back:card.front}</p>
+              <p className="text-xs mt-4" style={{ color:"#3D1F0A" }}>Toca para {flipped?"ver la pregunta":"ver la respuesta"}</p>
+            </div>
+            <div className="flex items-center justify-between mt-3">
+              <span className="text-xs" style={{ color:"#5C3518" }}>Tarjeta {idx+1} de {cards.length}</span>
+              <span className="text-xs" style={{ color:"#3D1F0A" }}>{idx<generalCards.length?"Información general":idx<generalCards.length+book.flashcards.length?"Colección de la obra":"Colección personal"}</span>
+            </div>
         <div className="flex items-center justify-center gap-4 mt-5">
           <button onClick={() => { setIdx(i=>Math.max(0,i-1)); setFlipped(false); }} disabled={idx===0} className="px-5 py-2.5 rounded-xl border text-sm disabled:opacity-30" style={{ background:"#1A0C04", borderColor:"#2A1408", color:"#7A5C3E" }}>← Anterior</button>
           <div className="flex gap-1.5">
@@ -1034,6 +1637,8 @@ function FlashcardScreen({ book, onBack }: { book: Book; onBack: () => void }) {
           </div>
           <button onClick={() => { setIdx(i=>Math.min(cards.length-1,i+1)); setFlipped(false); }} disabled={idx===cards.length-1} className="px-5 py-2.5 rounded-xl border text-sm disabled:opacity-30" style={{ background:"#1A0C04", borderColor:"#2A1408", color:"#7A5C3E" }}>Siguiente →</button>
         </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1056,7 +1661,7 @@ function DebateScreen({ book, user, onLoginNeeded, onBack }: { book: Book; user:
   async function post() {
     if (!user) { onLoginNeeded(); return; }
     if (!text.trim()) return;
-    await addDoc(collection(db, colId), { user:user.email?.split("@")[0]??"Anónimo", text:text.trim(), ts:Date.now(), likes:0, likedBy:[] });
+    await addDoc(collection(db, colId), { user:user.email?.split("@")[0]??"Anónimo", authorId:user.uid, text:text.trim(), ts:Date.now(), likes:0, likedBy:[] });
     setText(""); fetch();
     awardPoints(user.uid, 5);
     try { await updateDoc(doc(db,"users",user.uid),{ totalDebates:increment(1) }); } catch {}
@@ -1066,6 +1671,14 @@ function DebateScreen({ book, user, onLoginNeeded, onBack }: { book: Book; user:
     const ref = doc(db, colId, p.id);
     const liked = p.likedBy.includes(user.uid);
     await updateDoc(ref, liked ? { likes:increment(-1), likedBy:arrayRemove(user.uid) } : { likes:increment(1), likedBy:arrayUnion(user.uid) });
+    if (!liked && p.authorId) {
+      const authorRef = doc(db,"users",p.authorId);
+      const authorSnap = await getDoc(authorRef);
+      const previous = (authorSnap.data()?.bestDebateResponse?.likes as number|undefined)??-1;
+      if (p.likes+1 > previous) {
+        await setDoc(authorRef,{ bestDebateResponse:{ text:p.text, likes:p.likes+1, bookTitle:book.title } },{ merge:true });
+      }
+    }
     fetch();
   }
 
@@ -1082,6 +1695,18 @@ function DebateScreen({ book, user, onLoginNeeded, onBack }: { book: Book; user:
             <p className="text-xs" style={{ color:"#5C3518" }}>Los argumentos con más likes suben al top</p>
           </div>
         </div>
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          {[
+            ["Voces", posts.length],
+            ["Apoyos", posts.reduce((total,p)=>total+p.likes,0)],
+            ["Recompensa", "+5 pts"],
+          ].map(([label,value]) => (
+            <div key={label} className="rounded-xl border px-3 py-2.5 text-center" style={{ background:"#1A0C04", borderColor:"#2A1408" }}>
+              <div className="font-display font-bold" style={{ color:"#D4A853" }}>{value}</div>
+              <div className="text-xs" style={{ color:"#5C3518" }}>{label}</div>
+            </div>
+          ))}
+        </div>
         {/* Prompt card */}
         <div className="rounded-2xl border p-5 mb-5" style={{ background:`linear-gradient(135deg,${book.color}18,#1E0E04)`, borderColor:book.color+"44" }}>
           <div className="flex items-center gap-2 mb-2">
@@ -1091,6 +1716,14 @@ function DebateScreen({ book, user, onLoginNeeded, onBack }: { book: Book; user:
           <h3 className="font-display text-lg font-bold mb-2" style={{ color:"#F5ECD7" }}>{prompt.question}</h3>
           <p className="text-sm leading-relaxed" style={{ color:"#7A5C3E" }}>{prompt.context}</p>
           <p className="text-xs mt-3" style={{ color:"#5C3518" }}>💬 +5 puntos · ❤️ Los likes determinan el top</p>
+        </div>
+        <div className="rounded-2xl border p-4 mb-5" style={{ background:"#160B05", borderColor:"#2A1408" }}>
+          <p className="text-xs tracking-widest uppercase mb-2" style={{ color:"#D4A853" }}>Antes de publicar</p>
+          <div className="grid sm:grid-cols-3 gap-2 text-xs leading-relaxed" style={{ color:"#7A5C3E" }}>
+            <p><strong style={{ color:"#EDE0C4" }}>Tesis.</strong> Toma una postura inequívoca.</p>
+            <p><strong style={{ color:"#EDE0C4" }}>Evidencia.</strong> Cita una escena o decisión.</p>
+            <p><strong style={{ color:"#EDE0C4" }}>Matiz.</strong> Anticipa una objeción razonable.</p>
+          </div>
         </div>
         {/* Input */}
         <div className="rounded-2xl border p-4 mb-5" style={{ background:"#1A0C04", borderColor:"#2A1408" }}>
@@ -1189,12 +1822,21 @@ function ForumScreen({ book, user, onLoginNeeded, onBack }: { book: Book; user: 
       <div className="max-w-2xl mx-auto px-4 py-6">
         <button onClick={onBack} className="text-sm mb-4 hover:opacity-70 block" style={{ color:"#7A5C3E" }}>‹ {book.title}</button>
         {/* Reddit-style header */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg" style={{ background:book.color }}>{book.badgeIcon}</div>
-          <div>
-            <h2 className="font-bold text-base" style={{ color:"#F5ECD7" }}>r/{book.id}</h2>
-            <p className="text-xs" style={{ color:"#5C3518" }}>{posts.length} posts · Foro de {book.title}</p>
+        <div className="rounded-2xl border overflow-hidden mb-4" style={{ background:"#1A0C04", borderColor:"#2A1408" }}>
+          <div className="h-16" style={{ background:`linear-gradient(120deg,${book.color}66,${book.spine}22,#1A0C04)` }} />
+          <div className="px-4 pb-4 -mt-5 flex items-end gap-3">
+            <div className="w-12 h-12 rounded-xl border-4 flex items-center justify-center text-lg" style={{ background:book.color, borderColor:"#1A0C04" }}>{book.badgeIcon}</div>
+            <div className="flex-1 pb-0.5">
+              <h2 className="font-bold text-base" style={{ color:"#F5ECD7" }}>r/{book.id}</h2>
+              <p className="text-xs" style={{ color:"#5C3518" }}>Comunidad de lectura · {posts.length} conversaciones</p>
+            </div>
+            <span className="text-xs px-2.5 py-1 rounded-full border" style={{ color:"#D4A853", borderColor:"#3D1F0A" }}>Abierto</span>
           </div>
+        </div>
+        <div className="flex gap-2 overflow-x-auto mb-4 pb-1">
+          {["Nuevos","Más votados","Análisis","Preguntas"].map((filter,index) => (
+            <span key={filter} className="whitespace-nowrap text-xs px-3 py-1.5 rounded-full border" style={{ background:index===0?"#2A1408":"transparent", borderColor:"#2A1408", color:index===0?"#D4A853":"#5C3518" }}>{filter}</span>
+          ))}
         </div>
         {/* Post input */}
         <div className="rounded-2xl border p-3 mb-5" style={{ background:"#1A0C04", borderColor:"#2A1408" }}>
@@ -1296,7 +1938,7 @@ function RedditPost({ post, user, depth, onUpvote, onReply, replyTo, replyText, 
 }
 
 // ── Root App ──────────────────────────────────────────────────────────────────
-type Screen = "home"|"book"|"quiz-difficulty"|"quiz"|"flashcards"|"debate"|"forum"|"profile";
+type Screen = "home"|"book"|"quiz-difficulty"|"quiz"|"flashcards"|"debate"|"forum"|"manual"|"profile";
 
 export default function App() {
   const [user, setUser] = useState<User|null>(null);
@@ -1346,24 +1988,32 @@ export default function App() {
     else { setScreen("forum"); }
   }
 
-  async function handleQuizDone(pts: number, perfect: boolean) {
-    refreshStats();
-    if (perfect && quizDifficulty==="hard" && selectedBook && user) {
-      const booksHard = [...(stats.completedBooksHard??[])];
-      if (!booksHard.includes(selectedBook.id)) {
-        booksHard.push(selectedBook.id);
-        await updateDoc(doc(db,"users",user.uid),{ completedBooksHard:booksHard, completedBooks:arrayUnion(selectedBook.id), totalQuizzes:increment(1) });
-        setStats(prev => ({ ...prev, completedBooksHard:booksHard }));
-      }
-    } else if (user && selectedBook) {
-      await updateDoc(doc(db,"users",user.uid),{ completedBooks:arrayUnion(selectedBook.id), totalQuizzes:increment(1) });
-    }
-    refreshStats();
-    setScreen("book");
+  async function handleQuizDone(_pts: number, perfect: boolean) {
+    if (!user || !selectedBook) return;
+    const levelKey = `${selectedBook.id}:${quizDifficulty}`;
+    const update: Record<string,unknown> = {
+      completedBooks:arrayUnion(selectedBook.id),
+      completedLevels:arrayUnion(levelKey),
+      totalQuizzes:increment(1),
+    };
+    if (perfect && quizDifficulty==="hard") update.completedBooksHard = arrayUnion(selectedBook.id);
+    await updateDoc(doc(db,"users",user.uid),update);
+    setStats(prev=>({
+      ...prev,
+      completedBooks:[...new Set([...(prev.completedBooks??[]),selectedBook.id])],
+      completedLevels:[...new Set([...(prev.completedLevels??[]),levelKey])],
+      completedBooksHard:perfect&&quizDifficulty==="hard"
+        ? [...new Set([...(prev.completedBooksHard??[]),selectedBook.id])]
+        : prev.completedBooksHard,
+      totalQuizzes:(prev.totalQuizzes??0)+1,
+    }));
   }
 
   function handleTabChange(t: Tab) {
-    setTab(t); if (t==="library") setScreen("home"); else setScreen("profile");
+    setTab(t);
+    if (t==="library") setScreen("home");
+    else if (t==="manual") setScreen("manual");
+    else setScreen("profile");
   }
 
   if (!authReady) return (
@@ -1391,10 +2041,11 @@ export default function App() {
 
       {/* Main content */}
       {screen==="home" && <HomeScreen user={user} stats={stats} onBook={b => { setSelectedBook(b); setScreen("book"); setTab("library"); }} />}
+      {screen==="manual" && <ManualScreen />}
       {screen==="profile" && <ProfileScreen user={user} stats={stats} onLoginClick={() => setShowLogin(true)} onLogout={handleLogout} />}
       {screen==="book" && selectedBook && <BookDetailScreen book={selectedBook} stats={stats} onMode={handleBookMode} onBack={() => { setScreen("home"); setTab("library"); }} />}
       {screen==="quiz-difficulty" && selectedBook && <QuizDifficultyScreen book={selectedBook} onSelect={d => { setQuizDifficulty(d); setScreen("quiz"); }} onBack={() => setScreen("book")} />}
-      {screen==="quiz" && selectedBook && <QuizScreen book={selectedBook} user={user} difficulty={quizDifficulty} onDone={handleQuizDone} onBack={() => setScreen("quiz-difficulty")} />}
+      {screen==="quiz" && selectedBook && <QuizScreen book={selectedBook} user={user} stats={stats} difficulty={quizDifficulty} onDone={handleQuizDone} onBack={() => setScreen("book")} />}
       {screen==="flashcards" && selectedBook && <FlashcardScreen book={selectedBook} onBack={() => setScreen("book")} />}
       {screen==="debate" && selectedBook && <DebateScreen book={selectedBook} user={user} onLoginNeeded={() => setShowLogin(true)} onBack={() => setScreen("book")} />}
       {screen==="forum" && selectedBook && <ForumScreen book={selectedBook} user={user} onLoginNeeded={() => setShowLogin(true)} onBack={() => setScreen("book")} />}
